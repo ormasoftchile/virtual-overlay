@@ -69,6 +69,7 @@ private:
     int GetDesktopIndexByGUID(const GUID& guid);
     int GetDesktopIndexFromPolling(const GUID& desktopId);
     std::wstring GetDesktopNameFromRegistry(const GUID& desktopId);
+    bool GetCurrentDesktopIdFromRegistry(GUID& desktopId);
     std::wstring HStringToWString(HSTRING hstr);
 
     // Internal notification handler

@@ -47,6 +47,7 @@ struct GeneralConfig {
     bool showTrayIcon = true;
     std::wstring settingsHotkey = L"Ctrl+Shift+O";
     std::wstring overlayToggleHotkey = L"Ctrl+Shift+D";  // Toggle overlay visibility
+    bool forcePollingMode = true;  // Always use polling for desktop detection (more reliable)
 };
 
 // Zoom settings

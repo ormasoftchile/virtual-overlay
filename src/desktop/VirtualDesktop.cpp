@@ -61,23 +61,23 @@ bool VirtualDesktop::Init() {
         LOG_WARN("Failed to get public IVirtualDesktopManager: 0x%08X", hr);
     }
 
-    // Try to acquire private interfaces for notifications
-    if (!AcquireVirtualDesktopInterfaces()) {
-        LOG_WARN("Failed to acquire internal virtual desktop interfaces");
-        
-        // Fall back to polling if public API is available
-        if (m_pPublicVirtualDesktopManager) {
-            m_usingPolling = true;
-            m_available = true;
-            LOG_INFO("Using polling fallback for desktop change detection");
-        } else {
+    // Always use polling mode for reliability across different Windows builds
+    // The internal COM interfaces have undocumented GUIDs that change frequently
+    if (m_pPublicVirtualDesktopManager) {
+        m_usingPolling = true;
+        m_available = true;
+        LOG_INFO("Using polling mode for desktop change detection (reliable across Windows versions)");
+    } else {
+        // No public API available - try internal interfaces as last resort
+        if (!AcquireVirtualDesktopInterfaces()) {
+            LOG_WARN("Failed to acquire virtual desktop interfaces");
             m_available = false;
             LOG_WARN("Virtual desktop feature will be disabled");
+        } else {
+            m_available = true;
+            m_usingPolling = false;
+            LOG_INFO("Virtual desktop interfaces acquired (notification-based)");
         }
-    } else {
-        m_available = true;
-        m_usingPolling = false;
-        LOG_INFO("Virtual desktop interfaces acquired successfully (notification-based)");
     }
 
     m_initialized = true;
@@ -821,19 +821,52 @@ std::wstring VirtualDesktop::GetDesktopNameFromRegistry(const GUID& desktopId) {
     return L"Desktop " + std::to_wstring(index);
 }
 
+bool VirtualDesktop::GetCurrentDesktopIdFromRegistry(GUID& desktopId) {
+    // Read CurrentVirtualDesktop from registry - this is the most reliable method
+    HKEY hKey = nullptr;
+    LONG result = RegOpenKeyExW(
+        HKEY_CURRENT_USER,
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops",
+        0,
+        KEY_READ,
+        &hKey
+    );
+    
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+    
+    DWORD dataSize = sizeof(GUID);
+    DWORD type = 0;
+    result = RegQueryValueExW(hKey, L"CurrentVirtualDesktop", nullptr, &type, 
+                              reinterpret_cast<LPBYTE>(&desktopId), &dataSize);
+    RegCloseKey(hKey);
+    
+    return (result == ERROR_SUCCESS && type == REG_BINARY && dataSize == sizeof(GUID));
+}
+
 void VirtualDesktop::SetDesktopSwitchCallback(DesktopSwitchCallback callback) {
     m_switchCallback = std::move(callback);
     
     if (m_usingPolling && m_switchCallback) {
-        // Initialize current desktop ID for change detection
-        HWND hForeground = GetForegroundWindow();
-        if (hForeground && m_pPublicVirtualDesktopManager) {
-            m_pPublicVirtualDesktopManager->GetWindowDesktopId(hForeground, &m_lastKnownDesktopId);
+        // Initialize current desktop ID from registry (most reliable)
+        if (!GetCurrentDesktopIdFromRegistry(m_lastKnownDesktopId)) {
+            // Fallback to window-based detection
+            HWND hForeground = GetForegroundWindow();
+            if (hForeground && m_pPublicVirtualDesktopManager) {
+                m_pPublicVirtualDesktopManager->GetWindowDesktopId(hForeground, &m_lastKnownDesktopId);
+            }
         }
-        m_lastKnownDesktopIndex = 1;
         
-        // Use polling timer to detect desktop changes via public API
-        // The undocumented WinEvent 0x0020 doesn't work reliably
+        if (!IsEqualGUID(m_lastKnownDesktopId, GUID{})) {
+            m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(m_lastKnownDesktopId);
+            LOG_INFO("Initial desktop: index=%d", m_lastKnownDesktopIndex);
+        } else {
+            m_lastKnownDesktopIndex = 1;
+            LOG_WARN("Could not determine initial desktop ID");
+        }
+        
+        // Use polling timer to detect desktop changes via registry
         m_pollingTimer = SetTimer(nullptr, 0, 150, PollingTimerProc);
         if (m_pollingTimer) {
             LOG_INFO("Started desktop polling timer for change detection");
@@ -870,65 +903,63 @@ void CALLBACK VirtualDesktop::PollingTimerProc(HWND, UINT, UINT_PTR, DWORD) {
 }
 
 void VirtualDesktop::CheckDesktopChange() {
-    if (!m_pPublicVirtualDesktopManager || !m_switchCallback) {
+    if (!m_switchCallback) {
         return;
     }
     
-    // Get any visible window to check its desktop ID
-    HWND hWnd = GetForegroundWindow();
-    if (!hWnd) {
-        // Fallback to shell window
-        hWnd = GetShellWindow();
-    }
-    if (!hWnd) {
-        return;
-    }
-    
-    // Check if the window is on the current virtual desktop
-    BOOL isOnCurrent = FALSE;
-    HRESULT hr = m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(hWnd, &isOnCurrent);
-    
-    if (FAILED(hr)) {
-        return;
-    }
-    
-    // Get the desktop ID for this window
     GUID currentDesktopId = {};
-    hr = m_pPublicVirtualDesktopManager->GetWindowDesktopId(hWnd, &currentDesktopId);
-    if (FAILED(hr) || IsEqualGUID(currentDesktopId, GUID{})) {
-        // Window might be on all desktops - try a different approach
-        // Enumerate top-level windows to find one with a valid desktop ID
-        struct EnumData {
-            IVirtualDesktopManager* pMgr;
-            GUID desktopId;
-            bool found;
-        } data = { m_pPublicVirtualDesktopManager.Get(), {}, false };
+    
+    // Method 1: Use registry (most reliable, doesn't require windows on desktop)
+    if (GetCurrentDesktopIdFromRegistry(currentDesktopId)) {
+        // Registry method worked
+    }
+    // Method 2: Fallback to IVirtualDesktopManager API
+    else if (m_pPublicVirtualDesktopManager) {
+        // Get any visible window to check its desktop ID
+        HWND hWnd = GetForegroundWindow();
+        if (!hWnd) {
+            hWnd = GetShellWindow();
+        }
         
-        EnumWindows([](HWND hw, LPARAM lp) -> BOOL {
-            auto* pData = reinterpret_cast<EnumData*>(lp);
-            if (!IsWindowVisible(hw)) return TRUE;
-            
-            GUID id = {};
-            if (SUCCEEDED(pData->pMgr->GetWindowDesktopId(hw, &id)) && !IsEqualGUID(id, GUID{})) {
-                BOOL onCurrent = FALSE;
-                if (SUCCEEDED(pData->pMgr->IsWindowOnCurrentVirtualDesktop(hw, &onCurrent)) && onCurrent) {
-                    pData->desktopId = id;
-                    pData->found = true;
-                    return FALSE;  // Stop enumeration
+        if (hWnd) {
+            HRESULT hr = m_pPublicVirtualDesktopManager->GetWindowDesktopId(hWnd, &currentDesktopId);
+            if (FAILED(hr) || IsEqualGUID(currentDesktopId, GUID{})) {
+                // Window might be on all desktops - enumerate to find one
+                struct EnumData {
+                    IVirtualDesktopManager* pMgr;
+                    GUID desktopId;
+                    bool found;
+                } data = { m_pPublicVirtualDesktopManager.Get(), {}, false };
+                
+                EnumWindows([](HWND hw, LPARAM lp) -> BOOL {
+                    auto* pData = reinterpret_cast<EnumData*>(lp);
+                    if (!IsWindowVisible(hw)) return TRUE;
+                    
+                    GUID id = {};
+                    if (SUCCEEDED(pData->pMgr->GetWindowDesktopId(hw, &id)) && !IsEqualGUID(id, GUID{})) {
+                        BOOL onCurrent = FALSE;
+                        if (SUCCEEDED(pData->pMgr->IsWindowOnCurrentVirtualDesktop(hw, &onCurrent)) && onCurrent) {
+                            pData->desktopId = id;
+                            pData->found = true;
+                            return FALSE;  // Stop enumeration
+                        }
+                    }
+                    return TRUE;
+                }, reinterpret_cast<LPARAM>(&data));
+                
+                if (data.found) {
+                    currentDesktopId = data.desktopId;
                 }
             }
-            return TRUE;
-        }, reinterpret_cast<LPARAM>(&data));
-        
-        if (data.found) {
-            currentDesktopId = data.desktopId;
-        } else {
-            return;  // Can't determine current desktop
         }
     }
     
+    // If we couldn't determine current desktop, skip this check
+    if (IsEqualGUID(currentDesktopId, GUID{})) {
+        return;
+    }
+    
     if (!IsEqualGUID(currentDesktopId, m_lastKnownDesktopId)) {
-        GUID oldId = m_lastKnownDesktopId;
         m_lastKnownDesktopId = currentDesktopId;
         
         // Calculate actual desktop index by enumerating desktops

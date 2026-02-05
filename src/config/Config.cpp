@@ -107,6 +107,7 @@ bool Config::Load(const std::wstring& filePath) {
                 std::string hotkey = g["overlayToggleHotkey"].get<std::string>();
                 m_config.general.overlayToggleHotkey = Utf8ToWide(hotkey);
             }
+            if (g.contains("forcePollingMode")) m_config.general.forcePollingMode = g["forcePollingMode"].get<bool>();
         }
         
         // Parse zoom settings
@@ -227,6 +228,7 @@ bool Config::Save(const std::wstring& filePath) {
         j["general"]["showTrayIcon"] = m_config.general.showTrayIcon;
         j["general"]["settingsHotkey"] = WideToUtf8(m_config.general.settingsHotkey);
         j["general"]["overlayToggleHotkey"] = WideToUtf8(m_config.general.overlayToggleHotkey);
+        j["general"]["forcePollingMode"] = m_config.general.forcePollingMode;
         
         // Zoom
         j["zoom"]["enabled"] = m_config.zoom.enabled;
