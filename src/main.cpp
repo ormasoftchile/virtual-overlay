@@ -178,6 +178,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         case WM_TIMER:
             if (wParam == VirtualOverlay::TIMER_ZOOM_UPDATE) {
                 VirtualOverlay::App::Instance().OnZoomTimer();
+            } else if (wParam == VirtualOverlay::TIMER_DESKTOP_POLL) {
+                VirtualOverlay::App::Instance().OnDesktopPollTimer();
             }
             return 0;
 

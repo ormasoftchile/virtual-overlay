@@ -42,6 +42,9 @@ public:
     // Notification registration
     void SetDesktopSwitchCallback(DesktopSwitchCallback callback);
     void ClearDesktopSwitchCallback();
+    
+    // Manual polling (called by App timer)
+    void CheckDesktopChange();
 
     // Expose version for debugging
     WindowsVirtualDesktopVersion GetWindowsVersion() const { return m_windowsVersion; }
@@ -100,11 +103,8 @@ private:
     ComPtr<IUnknown> m_pNotificationHandler;
     
     // Polling fallback
-    UINT_PTR m_pollingTimer = 0;
     GUID m_lastKnownDesktopId = {};
     int m_lastKnownDesktopIndex = 0;
-    static void CALLBACK PollingTimerProc(HWND, UINT, UINT_PTR, DWORD);
-    void CheckDesktopChange();
     
     // WinEvent hook for desktop switch detection
     HWINEVENTHOOK m_desktopSwitchHook = nullptr;

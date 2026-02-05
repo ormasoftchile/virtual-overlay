@@ -12,7 +12,9 @@ class OverlayWindow;
 
 // Timer ID for zoom update
 constexpr UINT_PTR TIMER_ZOOM_UPDATE = 1;
+constexpr UINT_PTR TIMER_DESKTOP_POLL = 2;
 constexpr UINT TIMER_ZOOM_INTERVAL_MS = 16;  // ~60 FPS
+constexpr UINT TIMER_DESKTOP_POLL_MS = 150;  // Desktop switch detection
 
 // Hotkey IDs
 constexpr int HOTKEY_OVERLAY_TOGGLE = 1;
@@ -54,6 +56,7 @@ public:
     void OnModifierUp();
     void OnCursorMove(int x, int y);
     void OnZoomTimer();
+    void OnDesktopPollTimer();  // Desktop switch detection
     
     // Overlay event handler
     void OnDesktopSwitched(int desktopIndex, const std::wstring& desktopName);

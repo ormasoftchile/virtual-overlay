@@ -89,12 +89,6 @@ void VirtualDesktop::Shutdown() {
         return;
     }
 
-    // Stop polling timer if active
-    if (m_pollingTimer != 0) {
-        KillTimer(nullptr, m_pollingTimer);
-        m_pollingTimer = 0;
-    }
-
     // Unhook WinEvent
     if (m_desktopSwitchHook) {
         UnhookWinEvent(m_desktopSwitchHook);
@@ -848,32 +842,25 @@ bool VirtualDesktop::GetCurrentDesktopIdFromRegistry(GUID& desktopId) {
 void VirtualDesktop::SetDesktopSwitchCallback(DesktopSwitchCallback callback) {
     m_switchCallback = std::move(callback);
     
-    if (m_usingPolling && m_switchCallback) {
-        // Initialize current desktop ID from registry (most reliable)
-        if (!GetCurrentDesktopIdFromRegistry(m_lastKnownDesktopId)) {
-            // Fallback to window-based detection
-            HWND hForeground = GetForegroundWindow();
-            if (hForeground && m_pPublicVirtualDesktopManager) {
-                m_pPublicVirtualDesktopManager->GetWindowDesktopId(hForeground, &m_lastKnownDesktopId);
-            }
-        }
-        
-        if (!IsEqualGUID(m_lastKnownDesktopId, GUID{})) {
-            m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(m_lastKnownDesktopId);
-            LOG_INFO("Initial desktop: index=%d", m_lastKnownDesktopIndex);
-        } else {
-            m_lastKnownDesktopIndex = 1;
-            LOG_WARN("Could not determine initial desktop ID");
-        }
-        
-        // Use polling timer to detect desktop changes via registry
-        m_pollingTimer = SetTimer(nullptr, 0, 150, PollingTimerProc);
-        if (m_pollingTimer) {
-            LOG_INFO("Started desktop polling timer for change detection");
-        } else {
-            LOG_ERROR("Failed to start polling timer: %lu", GetLastError());
+    // Initialize current desktop ID from registry (most reliable)
+    if (!GetCurrentDesktopIdFromRegistry(m_lastKnownDesktopId)) {
+        // Fallback to window-based detection
+        HWND hForeground = GetForegroundWindow();
+        if (hForeground && m_pPublicVirtualDesktopManager) {
+            m_pPublicVirtualDesktopManager->GetWindowDesktopId(hForeground, &m_lastKnownDesktopId);
         }
     }
+    
+    if (!IsEqualGUID(m_lastKnownDesktopId, GUID{})) {
+        m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(m_lastKnownDesktopId);
+        LOG_INFO("Initial desktop: index=%d", m_lastKnownDesktopIndex);
+    } else {
+        m_lastKnownDesktopIndex = 1;
+        LOG_WARN("Could not determine initial desktop ID");
+    }
+    
+    // Note: App manages the polling timer via TIMER_DESKTOP_POLL
+    LOG_INFO("Desktop switch callback registered (using App-managed polling)");
 }
 
 void VirtualDesktop::ClearDesktopSwitchCallback() {
@@ -883,11 +870,6 @@ void VirtualDesktop::ClearDesktopSwitchCallback() {
         UnhookWinEvent(m_desktopSwitchHook);
         m_desktopSwitchHook = nullptr;
     }
-    
-    if (m_pollingTimer != 0) {
-        KillTimer(nullptr, m_pollingTimer);
-        m_pollingTimer = 0;
-    }
 }
 
 void CALLBACK VirtualDesktop::WinEventProc(HWINEVENTHOOK, DWORD event, HWND, LONG, LONG, DWORD, DWORD) {
@@ -896,10 +878,6 @@ void CALLBACK VirtualDesktop::WinEventProc(HWINEVENTHOOK, DWORD event, HWND, LON
         vd.m_lastKnownDesktopIndex = (vd.m_lastKnownDesktopIndex % 10) + 1;
         vd.OnDesktopSwitched();
     }
-}
-
-void CALLBACK VirtualDesktop::PollingTimerProc(HWND, UINT, UINT_PTR, DWORD) {
-    VirtualDesktop::Instance().CheckDesktopChange();
 }
 
 void VirtualDesktop::CheckDesktopChange() {

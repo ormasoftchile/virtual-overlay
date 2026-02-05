@@ -189,6 +189,7 @@ void App::Shutdown() {
     // Stop zoom update timer
     if (m_hMainWnd) {
         KillTimer(m_hMainWnd, TIMER_ZOOM_UPDATE);
+        KillTimer(m_hMainWnd, TIMER_DESKTOP_POLL);
     }
 
     // Shutdown overlay first (depends on VirtualDesktop)
@@ -351,6 +352,10 @@ bool App::InitOverlay() {
             App::Instance().OnDesktopSwitched(index, name);
         }
     );
+    
+    // Start desktop polling timer (managed by App for reliable message pump delivery)
+    SetTimer(m_hMainWnd, TIMER_DESKTOP_POLL, TIMER_DESKTOP_POLL_MS, nullptr);
+    LOG_INFO("Started desktop polling timer");
 
     // For watermark mode, show immediately with current desktop info
     if (config.overlay.mode == OverlayMode::Watermark && config.overlay.enabled) {
@@ -553,6 +558,13 @@ void App::OnZoomTimer() {
     // Update cursor tracking based on zoom state
     // This reduces message volume when not zoomed
     InputHandler::Instance().SetCursorTracking(ZoomController::Instance().IsZoomed());
+}
+
+void App::OnDesktopPollTimer() {
+    if (!m_overlayEnabled) return;
+    
+    // Call VirtualDesktop to check for desktop changes
+    VirtualDesktop::Instance().CheckDesktopChange();
 }
 
 bool App::InitSettings() {
