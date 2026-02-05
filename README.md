@@ -122,6 +122,10 @@ Contributions welcome! Please:
 
 MIT License - see [LICENSE](LICENSE) for details.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
+
 ## Acknowledgments
 
 - [nlohmann/json](https://github.com/nlohmann/json) - JSON for Modern C++
