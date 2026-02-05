@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup WiX
+      run: dotnet tool install --global wix --version 5.0.1
+
+    - name: Create build directory
+      run: |
+        cmake -B build -G "Visual Studio 17 2022" -A x64
+
+    - name: Build Release
+      run: |
+        msbuild build\virtual-overlay.sln /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+
+    - name: Build MSI Installer
+      working-directory: installer
+      run: |
+        wix build Package.wxs -o VirtualOverlay.msi
+
+    - name: Upload MSI Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: VirtualOverlay-Installer
+        path: installer/VirtualOverlay.msi
+
+    - name: Upload EXE Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: VirtualOverlay-Portable
+        path: build/Release/virtual-overlay.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Download MSI
+      uses: actions/download-artifact@v4
+      with:
+        name: VirtualOverlay-Installer
+
+    - name: Download EXE
+      uses: actions/download-artifact@v4
+      with:
+        name: VirtualOverlay-Portable
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          VirtualOverlay.msi
+          virtual-overlay.exe
+        generate_release_notes: true
