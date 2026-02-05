@@ -68,3 +68,6 @@ Desktop.ini
 
 # Test artifacts
 *.dmp
+
+# Specification documents (internal use only)
+specs/
