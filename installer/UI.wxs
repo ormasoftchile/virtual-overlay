@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Virtual Overlay WiX UI Customization
+  Extends the standard WixUI_InstallDir dialog set
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Fragment>
+    <!--
+      UI customization for Virtual Overlay installer
+      Based on WixUI_InstallDir with custom welcome text
+    -->
+    
+    <!-- Custom strings -->
+    <WixVariable Id="WixUIBannerBmp" Value="banner.bmp" Overridable="yes" />
+    <WixVariable Id="WixUIDialogBmp" Value="dialog.bmp" Overridable="yes" />
+
+    <!-- UI properties -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Virtual Overlay" />
+    
+    <!-- Launch on exit -->
+    <CustomAction Id="LaunchApplication"
+                  FileRef="VirtualOverlayExe"
+                  ExeCommand=""
+                  Impersonate="yes"
+                  Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApplication" After="InstallFinalize">
+        <![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed]]>
+      </Custom>
+    </InstallExecuteSequence>
+
+    <!-- Clean up auto-start registry on uninstall -->
+    <Component Id="CleanupAutoStart" Directory="INSTALLFOLDER" Guid="d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a">
+      <RegistryValue Root="HKCU"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="VirtualOverlay"
+                     Type="string"
+                     Value=""
+                     Action="write"
+                     KeyPath="yes" />
+      <RemoveRegistryValue Root="HKCU"
+                           Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                           Name="VirtualOverlay" />
+    </Component>
+
+  </Fragment>
+
+  <!--
+    Custom UI text localizations
+  -->
+  <Fragment>
+    <UI>
+      <!-- Welcome dialog text customization -->
+      <UIText Id="WelcomeDlgDescription">
+        The Setup Wizard will install [ProductName] on your computer.
+        
+        Virtual Overlay provides:
+        • Ctrl+Scroll zoom for any screen
+        • Virtual Desktop switching overlay
+        • System tray background operation
+        • Multi-monitor support
+        
+        Click Next to continue or Cancel to exit Setup.
+      </UIText>
+
+      <!-- Finish dialog text -->
+      <UIText Id="ExitDlgDescription">
+        [ProductName] has been successfully installed.
+        
+        The application will run in the system tray.
+        Use Ctrl+Scroll to zoom, and switch virtual desktops to see the overlay.
+      </UIText>
+
+      <!-- Custom action text for progress -->
+      <ProgressText Action="LaunchApplication">Preparing to launch Virtual Overlay...</ProgressText>
+    </UI>
+  </Fragment>
+
+</Wix>

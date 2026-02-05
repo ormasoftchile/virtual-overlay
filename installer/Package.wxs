@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Package Name="Virtual Overlay"
+             Manufacturer="Virtual Overlay"
+             Version="1.0.0.0"
+             UpgradeCode="F8E3B5A1-7C2D-4E9F-B6A8-3D1C5E7F9A2B"
+             Scope="perUser">
+
+        <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+        <Media Id="1" Cabinet="VirtualOverlay.cab" EmbedCab="yes" />
+
+        <Icon Id="AppIcon" SourceFile="..\res\icon.ico" />
+        <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+        <StandardDirectory Id="LocalAppDataFolder">
+            <Directory Id="INSTALLFOLDER" Name="VirtualOverlay">
+                <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+                    <File Id="VirtualOverlayExe" Source="..\build\Release\virtual-overlay.exe" KeyPath="yes">
+                        <Shortcut Id="StartMenuShortcut"
+                                  Name="Virtual Overlay"
+                                  Directory="ProgramMenuFolder"
+                                  WorkingDirectory="INSTALLFOLDER"
+                                  Icon="AppIcon"
+                                  Advertise="yes" />
+                    </File>
+                    
+                    <!-- Startup registry entry (optional - controlled by app settings) -->
+                    <RegistryValue Root="HKCU"
+                                   Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                                   Name="VirtualOverlay"
+                                   Type="string"
+                                   Value="[INSTALLFOLDER]virtual-overlay.exe"
+                                   KeyPath="no" />
+                </Component>
+            </Directory>
+        </StandardDirectory>
+
+        <StandardDirectory Id="ProgramMenuFolder" />
+
+        <Feature Id="MainFeature" Title="Virtual Overlay" Level="1">
+            <ComponentRef Id="MainExecutable" />
+        </Feature>
+
+    </Package>
+</Wix>

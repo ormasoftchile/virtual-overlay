@@ -1,0 +1,70 @@
+# Build outputs
+build/
+out/
+cmake-build-*/
+x64/
+x86/
+Debug/
+Release/
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.idb
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.opensdf
+*.sdf
+*.cachefile
+*.aps
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# IDE
+.idea/
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+*.swp
+*~
+
+# Dependencies (downloaded)
+# Note: lib/json.hpp is downloaded, but we commit it for reproducibility
+# Uncomment if you prefer to download at build time:
+# lib/
+
+# Application runtime files
+*.log
+config.json
+
+# Windows
+Thumbs.db
+Desktop.ini
+*.tmp
+
+# Installer outputs
+*.msi
+*.wixobj
+*.wixpdb
+
+# Test artifacts
+*.dmp
