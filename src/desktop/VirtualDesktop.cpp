@@ -80,6 +80,20 @@ bool VirtualDesktop::Init() {
         }
     }
 
+    // Verify registry-based detection works
+    GUID testGuid = {};
+    if (GetCurrentDesktopIdFromRegistry(testGuid)) {
+        wchar_t guidStr[64] = {};
+        StringFromGUID2(testGuid, guidStr, 64);
+        LOG_INFO("Registry desktop detection OK: %ws", guidStr);
+        
+        int idx = GetDesktopIndexFromPolling(testGuid);
+        std::wstring name = GetDesktopNameFromRegistry(testGuid);
+        LOG_INFO("Current desktop from registry: index=%d, name=%ws", idx, name.c_str());
+    } else {
+        LOG_WARN("Registry desktop detection FAILED - CurrentVirtualDesktop not found");
+    }
+
     m_initialized = true;
     return true;
 }
@@ -285,17 +299,31 @@ bool VirtualDesktop::GetCurrentDesktop(DesktopInfo& info) {
     
     // Fallback: use polling-based desktop index or return default
     if (m_usingPolling) {
-        // If we don't have a desktop ID yet, try to get it from foreground window
-        if (IsEqualGUID(m_lastKnownDesktopId, GUID{}) && m_pPublicVirtualDesktopManager) {
+        // Always read fresh from registry
+        GUID currentId = {};
+        if (GetCurrentDesktopIdFromRegistry(currentId)) {
+            info.id = currentId;
+            info.index = GetDesktopIndexFromPolling(currentId);
+            info.name = GetDesktopNameFromRegistry(currentId);
+            return true;
+        }
+        
+        // Try public VirtualDesktopManager API
+        if (m_pPublicVirtualDesktopManager) {
             HWND hForeground = GetForegroundWindow();
             if (hForeground) {
-                m_pPublicVirtualDesktopManager->GetWindowDesktopId(hForeground, &m_lastKnownDesktopId);
-                if (!IsEqualGUID(m_lastKnownDesktopId, GUID{})) {
-                    m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(m_lastKnownDesktopId);
+                GUID desktopId = {};
+                if (SUCCEEDED(m_pPublicVirtualDesktopManager->GetWindowDesktopId(hForeground, &desktopId)) 
+                    && !IsEqualGUID(desktopId, GUID{})) {
+                    info.id = desktopId;
+                    info.index = GetDesktopIndexFromPolling(desktopId);
+                    info.name = GetDesktopNameFromRegistry(desktopId);
+                    return true;
                 }
             }
         }
         
+        // Use cached values if available
         if (!IsEqualGUID(m_lastKnownDesktopId, GUID{})) {
             info.id = m_lastKnownDesktopId;
             info.index = m_lastKnownDesktopIndex;
@@ -885,6 +913,16 @@ void VirtualDesktop::CheckDesktopChange() {
         return;
     }
     
+    // Periodic log to confirm polling is active (every ~30 seconds)
+    static int pollCount = 0;
+    pollCount++;
+    if (pollCount % 200 == 1) {  // Every 200 * 150ms = 30s
+        wchar_t guidStr[64] = {};
+        StringFromGUID2(m_lastKnownDesktopId, guidStr, 64);
+        LOG_INFO("Desktop poll #%d - last known: index=%d guid=%ws", 
+                 pollCount, m_lastKnownDesktopIndex, guidStr);
+    }
+    
     GUID currentDesktopId = {};
     
     // Method 1: Use registry (most reliable, doesn't require windows on desktop)
@@ -934,16 +972,24 @@ void VirtualDesktop::CheckDesktopChange() {
     
     // If we couldn't determine current desktop, skip this check
     if (IsEqualGUID(currentDesktopId, GUID{})) {
+        if (pollCount % 200 == 1) {
+            LOG_WARN("Poll #%d: could not determine current desktop ID", pollCount);
+        }
         return;
     }
     
     if (!IsEqualGUID(currentDesktopId, m_lastKnownDesktopId)) {
+        wchar_t oldGuid[64] = {}, newGuid[64] = {};
+        StringFromGUID2(m_lastKnownDesktopId, oldGuid, 64);
+        StringFromGUID2(currentDesktopId, newGuid, 64);
+        
         m_lastKnownDesktopId = currentDesktopId;
         
         // Calculate actual desktop index by enumerating desktops
         m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(currentDesktopId);
         
-        LOG_DEBUG("Desktop change detected: polling found new desktop ID, index=%d", m_lastKnownDesktopIndex);
+        LOG_INFO("Desktop change detected! old=%ws new=%ws index=%d", 
+                 oldGuid, newGuid, m_lastKnownDesktopIndex);
         OnDesktopSwitched();
     }
 }
