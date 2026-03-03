@@ -44,7 +44,7 @@ struct ZoomState {
     bool modifierHeld = false;       // Is modifier key currently pressed
     DWORD lastModifierTap = 0;       // Timestamp for double-tap detection
     
-    bool isZoomed() const { return currentLevel > 1.0f; }
+    bool isZoomed() const { return currentLevel > 1.001f; }
     void reset() {
         currentLevel = 1.0f;
         targetLevel = 1.0f;

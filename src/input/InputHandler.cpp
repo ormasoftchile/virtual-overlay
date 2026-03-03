@@ -27,18 +27,10 @@ bool InputHandler::Init(HWND mainHwnd, UINT modifierVK) {
     m_modifierHeld = false;
     m_enabled = true;
 
-    // Install global hooks
-    if (!GlobalHooks::Instance().Install(mainHwnd)) {
-        LOG_ERROR("Failed to install global hooks for InputHandler");
-        return false;
-    }
-
-    // Set up callbacks
-    GlobalHooks::Instance().SetKeyboardCallback(
-        [this](WPARAM wParam, KBDLLHOOKSTRUCT* hookData) {
-            return this->OnKeyboardEvent(wParam, hookData);
-        }
-    );
+    // No hooks installed at init. Mouse hook is installed dynamically
+    // when modifier key is detected via GetAsyncKeyState polling.
+    // This avoids permanent low-level hooks that cause system-wide
+    // input latency on the thread's message pump.
 
     GlobalHooks::Instance().SetMouseCallback(
         [this](WPARAM wParam, MSLLHOOKSTRUCT* hookData) {
@@ -47,7 +39,7 @@ bool InputHandler::Init(HWND mainHwnd, UINT modifierVK) {
     );
 
     m_initialized = true;
-    LOG_INFO("InputHandler initialized with modifier key: %u", modifierVK);
+    LOG_INFO("InputHandler initialized with modifier key: %u (poll-based)", modifierVK);
     return true;
 }
 
@@ -56,12 +48,32 @@ void InputHandler::Shutdown() {
         return;
     }
 
-    GlobalHooks::Instance().SetKeyboardCallback(nullptr);
     GlobalHooks::Instance().SetMouseCallback(nullptr);
-    GlobalHooks::Instance().Uninstall();
+    GlobalHooks::Instance().UninstallMouseHook();
 
+    m_modifierHeld = false;
     m_initialized = false;
     LOG_INFO("InputHandler shutdown");
+}
+
+void InputHandler::PollModifierState() {
+    if (!m_enabled || !m_mainHwnd) {
+        return;
+    }
+
+    bool pressed = IsModifierPressed();
+
+    if (pressed && !m_modifierHeld) {
+        m_modifierHeld = true;
+        // Install mouse hook to capture scroll wheel for zoom
+        GlobalHooks::Instance().InstallMouseHook();
+        PostMessageW(m_mainHwnd, WM_USER_MODIFIER_DOWN, 0, 0);
+    } else if (!pressed && m_modifierHeld) {
+        m_modifierHeld = false;
+        // Remove mouse hook - no longer needed
+        GlobalHooks::Instance().UninstallMouseHook();
+        PostMessageW(m_mainHwnd, WM_USER_MODIFIER_UP, 0, 0);
+    }
 }
 
 bool InputHandler::IsModifierHeld() const {
@@ -70,6 +82,10 @@ bool InputHandler::IsModifierHeld() const {
 
 void InputHandler::SetEnabled(bool enabled) {
     m_enabled = enabled;
+    if (!enabled && m_modifierHeld) {
+        m_modifierHeld = false;
+        GlobalHooks::Instance().UninstallMouseHook();
+    }
 }
 
 bool InputHandler::IsEnabled() const {
@@ -78,43 +94,8 @@ bool InputHandler::IsEnabled() const {
 
 void InputHandler::SetModifierKey(UINT modifierVK) {
     m_modifierVK = modifierVK;
-    m_modifierHeld = false;  // Reset state on change
-}
-
-void InputHandler::SetCursorTracking(bool enabled) {
-    m_trackCursor = enabled;
-}
-
-bool InputHandler::IsCursorTracking() const {
-    return m_trackCursor;
-}
-
-bool InputHandler::OnKeyboardEvent(WPARAM wParam, KBDLLHOOKSTRUCT* hookData) {
-    if (!m_enabled || !hookData || !m_mainHwnd) {
-        return false;
-    }
-
-    // Check if this is our modifier key
-    if (!IsModifierKey(hookData->vkCode)) {
-        return false;
-    }
-
-    bool wasHeld = m_modifierHeld;
-
-    if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
-        if (!m_modifierHeld) {
-            m_modifierHeld = true;
-            PostMessageW(m_mainHwnd, WM_USER_MODIFIER_DOWN, 0, 0);
-        }
-    } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
-        if (m_modifierHeld) {
-            m_modifierHeld = false;
-            PostMessageW(m_mainHwnd, WM_USER_MODIFIER_UP, 0, 0);
-        }
-    }
-
-    // Don't consume modifier key events - let them pass through
-    return false;
+    m_modifierHeld = false;
+    GlobalHooks::Instance().UninstallMouseHook();
 }
 
 bool InputHandler::OnMouseEvent(WPARAM wParam, MSLLHOOKSTRUCT* hookData) {
@@ -124,14 +105,11 @@ bool InputHandler::OnMouseEvent(WPARAM wParam, MSLLHOOKSTRUCT* hookData) {
 
     // Handle mouse wheel when modifier is held
     if (wParam == WM_MOUSEWHEEL && m_modifierHeld) {
-        // Extract wheel delta - need to sign-extend from HIWORD
         short wheelDelta = static_cast<short>(HIWORD(hookData->mouseData));
 
         if (wheelDelta > 0) {
-            // Scroll up (away from user) = zoom out (swapped based on user feedback)
             PostMessageW(m_mainHwnd, WM_USER_ZOOM_OUT, 0, 0);
         } else if (wheelDelta < 0) {
-            // Scroll down (toward user) = zoom in (swapped based on user feedback)
             PostMessageW(m_mainHwnd, WM_USER_ZOOM_IN, 0, 0);
         }
 
@@ -139,31 +117,27 @@ bool InputHandler::OnMouseEvent(WPARAM wParam, MSLLHOOKSTRUCT* hookData) {
         return true;
     }
 
-    // Track cursor movement for pan - only when cursor tracking is enabled (we're zoomed)
-    // or when modifier is held (user is about to zoom)
-    if (wParam == WM_MOUSEMOVE && (m_trackCursor || m_modifierHeld)) {
-        // Pack coordinates into lParam (x in low word, y in high word)
-        LPARAM coords = MAKELPARAM(hookData->pt.x, hookData->pt.y);
-        PostMessageW(m_mainHwnd, WM_USER_CURSOR_MOVE, 0, coords);
-        // Don't consume mouse move events
-        return false;
-    }
-
     return false;
 }
 
-bool InputHandler::IsModifierKey(UINT vkCode) const {
+bool InputHandler::IsModifierPressed() const {
+    // GetAsyncKeyState returns the current physical key state.
+    // High bit set = key is currently down.
     switch (m_modifierVK) {
         case VK_CONTROL:
-            return vkCode == VK_CONTROL || vkCode == VK_LCONTROL || vkCode == VK_RCONTROL;
+            return (GetAsyncKeyState(VK_LCONTROL) & 0x8000) ||
+                   (GetAsyncKeyState(VK_RCONTROL) & 0x8000);
         case VK_MENU:  // Alt
-            return vkCode == VK_MENU || vkCode == VK_LMENU || vkCode == VK_RMENU;
+            return (GetAsyncKeyState(VK_LMENU) & 0x8000) ||
+                   (GetAsyncKeyState(VK_RMENU) & 0x8000);
         case VK_SHIFT:
-            return vkCode == VK_SHIFT || vkCode == VK_LSHIFT || vkCode == VK_RSHIFT;
+            return (GetAsyncKeyState(VK_LSHIFT) & 0x8000) ||
+                   (GetAsyncKeyState(VK_RSHIFT) & 0x8000);
         case VK_LWIN:
-            return vkCode == VK_LWIN || vkCode == VK_RWIN;
+            return (GetAsyncKeyState(VK_LWIN) & 0x8000) ||
+                   (GetAsyncKeyState(VK_RWIN) & 0x8000);
         default:
-            return vkCode == m_modifierVK;
+            return (GetAsyncKeyState(m_modifierVK) & 0x8000) != 0;
     }
 }
 

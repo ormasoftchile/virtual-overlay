@@ -14,15 +14,21 @@ class GlobalHooks {
 public:
     static GlobalHooks& Instance();
 
-    // Install hooks
+    // Install keyboard hook (mouse hook is managed dynamically)
     // mainHwnd: Window to receive hook messages
     bool Install(HWND mainHwnd);
 
-    // Uninstall hooks
+    // Uninstall all hooks
     void Uninstall();
 
-    // Check if hooks are installed
+    // Check if keyboard hook is installed
     bool IsInstalled() const;
+
+    // Dynamic mouse hook management - install only when needed
+    // (e.g., when modifier key is held for scroll-wheel zoom)
+    bool InstallMouseHook();
+    void UninstallMouseHook();
+    bool IsMouseHookInstalled() const;
 
     // Set callbacks for hook events
     // Return true from callback to consume the event (prevent further processing)

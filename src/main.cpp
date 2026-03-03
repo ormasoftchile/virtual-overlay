@@ -239,13 +239,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
             return 0;
 
-        case VirtualOverlay::WM_USER_CURSOR_MOVE: {
-            int x = GET_X_LPARAM(lParam);
-            int y = GET_Y_LPARAM(lParam);
-            VirtualOverlay::App::Instance().OnCursorMove(x, y);
-            return 0;
-        }
-
         default:
             break;
     }

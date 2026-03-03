@@ -189,6 +189,11 @@ void SmoothValue::Update(float deltaTime) {
     
     float factor = 1.0f - std::exp(-deltaTime / m_smoothing);
     m_current += (m_target - m_current) * factor;
+
+    // Snap to target when within float epsilon to prevent asymptotic stall
+    if (std::abs(m_target - m_current) < 1e-6f) {
+        m_current = m_target;
+    }
 }
 
 float SmoothValue::GetValue() const {

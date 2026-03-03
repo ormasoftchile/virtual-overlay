@@ -106,7 +106,7 @@ struct OverlayConfig {
     MonitorSelection monitor = MonitorSelection::Cursor;
     
     // Watermark-specific settings
-    int watermarkFontSize = 72;
+    int watermarkFontSize = 120;
     float watermarkOpacity = 0.25f;
     bool watermarkShadow = false;
     uint32_t watermarkColor = 0xFFFFFF;  // White by default

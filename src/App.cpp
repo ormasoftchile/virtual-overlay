@@ -536,14 +536,11 @@ void App::OnModifierUp() {
     }
 }
 
-void App::OnCursorMove(int x, int y) {
-    if (m_zoomEnabled && ZoomController::Instance().IsZoomed()) {
-        ZoomController::Instance().OnCursorMove(x, y);
-    }
-}
-
 void App::OnZoomTimer() {
     if (!m_zoomEnabled) return;
+
+    // Poll modifier key state (replaces keyboard hook)
+    InputHandler::Instance().PollModifierState();
 
     DWORD now = GetTickCount();
     float deltaMs = static_cast<float>(now - m_lastUpdateTime);
@@ -553,11 +550,16 @@ void App::OnZoomTimer() {
     if (deltaMs > 100.0f) deltaMs = 100.0f;
     if (deltaMs < 1.0f) deltaMs = 1.0f;
 
-    ZoomController::Instance().Update(deltaMs);
+    // Poll cursor position for pan tracking before update so it's
+    // incorporated in the same frame's magnification application
+    if (ZoomController::Instance().IsZoomed()) {
+        POINT pt;
+        if (GetCursorPos(&pt)) {
+            ZoomController::Instance().OnCursorMove(pt.x, pt.y);
+        }
+    }
 
-    // Update cursor tracking based on zoom state
-    // This reduces message volume when not zoomed
-    InputHandler::Instance().SetCursorTracking(ZoomController::Instance().IsZoomed());
+    ZoomController::Instance().Update(deltaMs);
 }
 
 void App::OnDesktopPollTimer() {

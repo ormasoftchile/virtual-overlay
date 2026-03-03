@@ -43,6 +43,18 @@ private:
 
     bool m_initialized = false;
     float m_currentLevel = 1.0f;
+
+    // Cached params to skip redundant MagSetFullscreenTransform calls
+    float m_lastLevel = 0.0f;
+    int m_lastOffsetX = -1;
+    int m_lastOffsetY = -1;
+
+    // Saved mouse settings to restore after magnification session.
+    // MagSetFullscreenTransform without UIAccess can modify the DWM
+    // cursor input pipeline and fail to revert on MagUninitialize.
+    int m_savedMouseSpeed = 0;
+    int m_savedMouseParams[3] = {};
+    bool m_mouseSettingsSaved = false;
 };
 
 }  // namespace VirtualOverlay

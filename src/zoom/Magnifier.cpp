@@ -29,22 +29,18 @@ bool Magnifier::Init() {
         LOG_WARN("Windows Magnifier is already running, zoom may conflict");
     }
 
-    // Initialize the Magnification API
-    if (!MagInitialize()) {
-        DWORD error = GetLastError();
-        LOG_ERROR("MagInitialize failed with error: %lu", error);
-        return false;
-    }
+    // Don't call MagInitialize here - defer it to SetFullscreenMagnification.
+    // The DWM magnification pipeline adds mouse input latency even at 1.0x,
+    // so we only activate it when actually zooming.
 
     // Reset any stale magnification from a previous crash or abnormal exit
-    // The Magnification API state persists at the system level
-    if (!MagSetFullscreenTransform(1.0f, 0, 0)) {
-        LOG_WARN("Failed to reset stale magnification on startup");
+    if (MagInitialize()) {
+        MagSetFullscreenTransform(1.0f, 0, 0);
+        MagUninitialize();
     }
 
-    m_initialized = true;
     m_currentLevel = 1.0f;
-    LOG_INFO("Magnification API initialized");
+    LOG_INFO("Magnifier ready (API will activate on first zoom)");
     return true;
 }
 
@@ -53,17 +49,9 @@ void Magnifier::Shutdown() {
         return;
     }
 
-    // Reset magnification before uninitializing
+    // Reset and uninitialize (ResetMagnification handles both)
     ResetMagnification();
 
-    // Uninitialize the Magnification API
-    if (!MagUninitialize()) {
-        DWORD error = GetLastError();
-        LOG_WARN("MagUninitialize failed with error: %lu", error);
-    }
-
-    m_initialized = false;
-    m_currentLevel = 1.0f;
     LOG_INFO("Magnification API shutdown");
 }
 
@@ -72,9 +60,27 @@ bool Magnifier::IsInitialized() const {
 }
 
 bool Magnifier::SetFullscreenMagnification(float level, int centerX, int centerY) {
+    // Lazily initialize the Magnification API on first use.
+    // We defer initialization so the DWM magnification pipeline
+    // is only active while actually zoomed, avoiding mouse latency.
     if (!m_initialized) {
-        LOG_ERROR("Magnifier not initialized");
-        return false;
+        // Save mouse speed and acceleration before activating magnification.
+        // MagSetFullscreenTransform without UIAccess can modify the DWM
+        // cursor pipeline and fail to revert it on MagUninitialize.
+        m_mouseSettingsSaved = false;
+        if (SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &m_savedMouseSpeed, 0)) {
+            if (SystemParametersInfoW(SPI_GETMOUSE, 0, m_savedMouseParams, 0)) {
+                m_mouseSettingsSaved = true;
+            }
+        }
+
+        if (!MagInitialize()) {
+            DWORD error = GetLastError();
+            LOG_ERROR("MagInitialize failed with error: %lu", error);
+            return false;
+        }
+        m_initialized = true;
+        LOG_DEBUG("Magnification API activated for zoom session");
     }
 
     // Clamp level to valid range
@@ -110,6 +116,11 @@ bool Magnifier::SetFullscreenMagnification(float level, int centerX, int centerY
     if (maxOffsetX > 0 && offsetX > maxOffsetX) offsetX = maxOffsetX;
     if (maxOffsetY > 0 && offsetY > maxOffsetY) offsetY = maxOffsetY;
 
+    // Skip redundant API calls when values haven't changed
+    if (level == m_lastLevel && offsetX == m_lastOffsetX && offsetY == m_lastOffsetY) {
+        return true;
+    }
+
     // Apply the magnification transform
     if (!MagSetFullscreenTransform(level, offsetX, offsetY)) {
         DWORD error = GetLastError();
@@ -118,6 +129,9 @@ bool Magnifier::SetFullscreenMagnification(float level, int centerX, int centerY
     }
 
     m_currentLevel = level;
+    m_lastLevel = level;
+    m_lastOffsetX = offsetX;
+    m_lastOffsetY = offsetY;
     return true;
 }
 
@@ -134,11 +148,36 @@ bool Magnifier::ResetMagnification() {
     if (!MagSetFullscreenTransform(1.0f, 0, 0)) {
         DWORD error = GetLastError();
         LOG_WARN("MagSetFullscreenTransform(1.0) failed with error: %lu", error);
-        return false;
     }
 
+    // Restore cursor visibility before uninitializing
+    MagShowSystemCursor(TRUE);
+
+    // Fully uninitialize the Magnification API
+    if (!MagUninitialize()) {
+        DWORD error = GetLastError();
+        LOG_WARN("MagUninitialize failed with error: %lu", error);
+    }
+
+    // Force-restore mouse speed and acceleration settings.
+    // Without UIAccess, the DWM magnification pipeline can modify
+    // cursor input behavior and not revert it on MagUninitialize.
+    if (m_mouseSettingsSaved) {
+        SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
+            reinterpret_cast<LPVOID>(static_cast<INT_PTR>(m_savedMouseSpeed)),
+            SPIF_SENDCHANGE);
+        SystemParametersInfoW(SPI_SETMOUSE, 0, m_savedMouseParams,
+            SPIF_SENDCHANGE);
+        m_mouseSettingsSaved = false;
+        LOG_DEBUG("Mouse settings restored (speed=%d)", m_savedMouseSpeed);
+    }
+
+    m_initialized = false;
     m_currentLevel = 1.0f;
-    LOG_DEBUG("Magnification reset to 1.0x");
+    m_lastLevel = 0.0f;
+    m_lastOffsetX = -1;
+    m_lastOffsetY = -1;
+    LOG_DEBUG("Magnification fully deactivated");
     return true;
 }
 

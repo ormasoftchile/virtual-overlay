@@ -23,13 +23,14 @@ GlobalHooks::~GlobalHooks() {
 }
 
 bool GlobalHooks::Install(HWND mainHwnd) {
-    if (m_keyboardHook && m_mouseHook) {
+    if (m_keyboardHook) {
         return true;  // Already installed
     }
 
     m_mainHwnd = mainHwnd;
 
     // Install low-level keyboard hook
+    // Mouse hook is installed dynamically via InstallMouseHook()
     m_keyboardHook = SetWindowsHookExW(
         WH_KEYBOARD_LL,
         LowLevelKeyboardProc,
@@ -43,7 +44,15 @@ bool GlobalHooks::Install(HWND mainHwnd) {
         return false;
     }
 
-    // Install low-level mouse hook
+    LOG_INFO("Keyboard hook installed");
+    return true;
+}
+
+bool GlobalHooks::InstallMouseHook() {
+    if (m_mouseHook) {
+        return true;  // Already installed
+    }
+
     m_mouseHook = SetWindowsHookExW(
         WH_MOUSE_LL,
         LowLevelMouseProc,
@@ -54,15 +63,21 @@ bool GlobalHooks::Install(HWND mainHwnd) {
     if (!m_mouseHook) {
         DWORD error = GetLastError();
         LOG_ERROR("Failed to install mouse hook, error: %lu", error);
-        
-        // Cleanup keyboard hook
-        UnhookWindowsHookEx(m_keyboardHook);
-        m_keyboardHook = nullptr;
         return false;
     }
 
-    LOG_INFO("Global hooks installed");
     return true;
+}
+
+void GlobalHooks::UninstallMouseHook() {
+    if (m_mouseHook) {
+        UnhookWindowsHookEx(m_mouseHook);
+        m_mouseHook = nullptr;
+    }
+}
+
+bool GlobalHooks::IsMouseHookInstalled() const {
+    return m_mouseHook != nullptr;
 }
 
 void GlobalHooks::Uninstall() {
@@ -81,7 +96,7 @@ void GlobalHooks::Uninstall() {
 }
 
 bool GlobalHooks::IsInstalled() const {
-    return m_keyboardHook != nullptr && m_mouseHook != nullptr;
+    return m_keyboardHook != nullptr;
 }
 
 void GlobalHooks::SetKeyboardCallback(KeyboardCallback callback) {

@@ -54,7 +54,6 @@ public:
     void OnZoomReset();
     void OnModifierDown();
     void OnModifierUp();
-    void OnCursorMove(int x, int y);
     void OnZoomTimer();
     void OnDesktopPollTimer();  // Desktop switch detection
     
