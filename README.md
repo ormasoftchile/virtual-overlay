@@ -9,12 +9,15 @@ A lightweight Windows utility that displays an overlay showing your current virt
 
 - **Watermark Mode** - Always-visible, transparent text overlay showing desktop name
 - **Notification Mode** - Brief popup when switching desktops
+- **Live Rename Detection** - Overlay updates immediately when you rename a desktop
 - **Customizable** - Position, color, opacity, font size
 - **Dodge Mode** - Overlay moves away when your cursor approaches
 - **Multi-monitor** - Works across all displays
 - **Keyboard Shortcut** - Toggle visibility with Ctrl+Shift+D
 - **Desktop Names** - Shows custom names from Windows Settings
 - **Zoom Feature** - Ctrl+Scroll to magnify screen content
+- **Touchpad Pinch** - Pinch-to-zoom gesture support
+- **Double-tap Reset** - Double-tap the modifier key to reset zoom
 
 ## Installation
 
@@ -44,6 +47,8 @@ Download `virtual-overlay.exe` and run directly.
 |----------|--------|
 | Ctrl+Shift+D | Toggle overlay visibility |
 | Ctrl+Scroll | Zoom in/out |
+| Pinch gesture | Zoom in/out (touchpad) |
+| Double-tap Ctrl | Reset zoom to 1x |
 
 ### Configuration File
 
@@ -82,27 +87,35 @@ wix build Package.wxs -o VirtualOverlay.msi
 
 ```
 src/
-├── main.cpp              # Entry point
+├── main.cpp              # Entry point, message loop
 ├── App.cpp               # Application controller
 ├── config/               # Configuration management
-├── desktop/              # Virtual Desktop COM API
+├── desktop/              # Virtual Desktop detection (COM + registry polling)
 ├── overlay/              # D2D overlay rendering
 ├── settings/             # Settings UI
 ├── tray/                 # System tray icon
-├── input/                # Keyboard/mouse hooks
-├── zoom/                 # Magnification feature
-└── utils/                # Helpers (logging, monitors)
+├── input/                # Modifier key polling, dynamic mouse hook
+├── zoom/                 # Magnification API, zoom controller
+└── utils/                # Helpers (logging, monitors, animation)
 ```
 
 ## Technical Notes
 
 ### Windows Virtual Desktop API
-This app uses undocumented COM interfaces that Microsoft changes between Windows versions. When the COM API fails (common on newer Windows 11 builds), the app falls back to a polling mechanism using the public `IVirtualDesktopManager` interface.
+This app uses undocumented COM interfaces that Microsoft changes between Windows versions. When the COM API fails (common on newer Windows 11 builds), the app falls back to a polling mechanism using the public `IVirtualDesktopManager` interface and registry reads.
 
 Desktop names are read from the Windows registry:
 ```
 HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops\{GUID}\Name
 ```
+
+Name changes are detected every 150ms via polling, so renaming a desktop updates the overlay without needing to switch away and back.
+
+### Zoom Architecture
+The zoom feature uses the Windows Magnification API (`MagSetFullscreenTransform`). To avoid mouse input latency:
+- The Magnification API is only initialized while actively zoomed, and fully uninitialized (`MagUninitialize`) when zoom returns to 1.0x
+- Mouse speed/acceleration settings are saved and restored around each zoom session to compensate for a DWM cursor pipeline issue when running without `uiAccess`
+- No permanent low-level hooks — modifier key state is polled via `GetAsyncKeyState`, and the mouse hook is only installed while the modifier key is held
 
 ### Rendering
 - Uses Direct2D with per-pixel alpha for true transparency
