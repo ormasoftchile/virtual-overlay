@@ -105,6 +105,7 @@ private:
     // Polling fallback
     GUID m_lastKnownDesktopId = {};
     int m_lastKnownDesktopIndex = 0;
+    std::wstring m_lastKnownDesktopName;
     
     // WinEvent hook for desktop switch detection
     HWINEVENTHOOK m_desktopSwitchHook = nullptr;

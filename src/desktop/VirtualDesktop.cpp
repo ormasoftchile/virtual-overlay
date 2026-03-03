@@ -987,10 +987,19 @@ void VirtualDesktop::CheckDesktopChange() {
         
         // Calculate actual desktop index by enumerating desktops
         m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(currentDesktopId);
+        m_lastKnownDesktopName = GetDesktopNameFromRegistry(currentDesktopId);
         
         LOG_INFO("Desktop change detected! old=%ws new=%ws index=%d", 
                  oldGuid, newGuid, m_lastKnownDesktopIndex);
         OnDesktopSwitched();
+    } else {
+        // Same desktop — check if the name was changed (e.g. user renamed it)
+        std::wstring currentName = GetDesktopNameFromRegistry(currentDesktopId);
+        if (currentName != m_lastKnownDesktopName) {
+            m_lastKnownDesktopName = currentName;
+            LOG_INFO("Desktop name change detected: %ws", currentName.c_str());
+            OnDesktopSwitched();
+        }
     }
 }
 
