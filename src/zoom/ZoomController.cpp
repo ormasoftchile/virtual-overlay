@@ -245,11 +245,14 @@ void ZoomController::ApplyMagnification() {
     // Skip magnification API calls when at or very close to 1.0x zoom
     // This prevents unnecessary API calls that can affect cursor behavior
     if (m_state.currentLevel <= 1.001f) {
-        // If we were zoomed before and have now returned to 1.0, do a final reset
-        if (m_state.activeMonitor != nullptr) {
+        // If magnification is still active, fully deactivate it.
+        // We check IsInitialized() rather than activeMonitor because
+        // ResetZoom() clears activeMonitor immediately while the smooth
+        // animation is still in progress, which would skip cleanup.
+        if (Magnifier::Instance().IsInitialized()) {
             Magnifier::Instance().ResetMagnification();
-            m_state.activeMonitor = nullptr;
         }
+        m_state.activeMonitor = nullptr;
         return;
     }
 
