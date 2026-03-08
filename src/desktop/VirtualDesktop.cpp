@@ -3,6 +3,7 @@
 #include "../utils/Logger.h"
 #include <roapi.h>
 #include <winstring.h>
+#include <algorithm>
 #include <vector>
 
 #pragma comment(lib, "runtimeobject.lib")
@@ -867,6 +868,161 @@ bool VirtualDesktop::GetCurrentDesktopIdFromRegistry(GUID& desktopId) {
     return (result == ERROR_SUCCESS && type == REG_BINARY && dataSize == sizeof(GUID));
 }
 
+std::vector<GUID> VirtualDesktop::GetAllDesktopIdsFromRegistry() {
+    std::vector<GUID> result;
+    
+    HKEY hKey = nullptr;
+    LONG status = RegOpenKeyExW(
+        HKEY_CURRENT_USER,
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops",
+        0,
+        KEY_READ,
+        &hKey
+    );
+    
+    if (status != ERROR_SUCCESS) {
+        return result;
+    }
+    
+    DWORD dataSize = 0;
+    status = RegQueryValueExW(hKey, L"VirtualDesktopIDs", nullptr, nullptr, nullptr, &dataSize);
+    
+    if (status != ERROR_SUCCESS || dataSize == 0 || dataSize % sizeof(GUID) != 0) {
+        RegCloseKey(hKey);
+        return result;
+    }
+    
+    std::vector<BYTE> data(dataSize);
+    status = RegQueryValueExW(hKey, L"VirtualDesktopIDs", nullptr, nullptr, data.data(), &dataSize);
+    RegCloseKey(hKey);
+    
+    if (status != ERROR_SUCCESS) {
+        return result;
+    }
+    
+    int count = static_cast<int>(dataSize / sizeof(GUID));
+    const GUID* guids = reinterpret_cast<const GUID*>(data.data());
+    result.assign(guids, guids + count);
+    return result;
+}
+
+GUID VirtualDesktop::FindCurrentDesktopByElimination() {
+    if (!m_pPublicVirtualDesktopManager) {
+        return {};
+    }
+    
+    std::vector<GUID> allDesktops = GetAllDesktopIdsFromRegistry();
+    if (allDesktops.empty()) {
+        return {};
+    }
+    
+    // First pass: try to find a window that IS on the current desktop
+    // and has a valid (non-null) desktop ID. This handles the case where
+    // the target desktop has windows but the registry was stale.
+    // Second pass (implicit): eliminate desktops whose windows are NOT on the
+    // current desktop. If exactly one desktop remains, it's the empty current one.
+    
+    struct EnumData {
+        IVirtualDesktopManager* pMgr;
+        GUID foundId;                 // Set if we directly find a window on current VD
+        bool directlyFound;
+        std::vector<GUID>* candidates;
+    } data = { m_pPublicVirtualDesktopManager.Get(), {}, false, &allDesktops };
+    
+    EnumWindows([](HWND hw, LPARAM lp) -> BOOL {
+        auto* pData = reinterpret_cast<EnumData*>(lp);
+        if (!IsWindowVisible(hw)) return TRUE;
+        
+        GUID desktopId = {};
+        if (FAILED(pData->pMgr->GetWindowDesktopId(hw, &desktopId)) ||
+            IsEqualGUID(desktopId, GUID{})) {
+            return TRUE;  // Skip pinned / all-desktop windows
+        }
+        
+        BOOL onCurrent = FALSE;
+        if (SUCCEEDED(pData->pMgr->IsWindowOnCurrentVirtualDesktop(hw, &onCurrent))) {
+            if (onCurrent) {
+                // Direct hit — this window is on the current desktop
+                pData->foundId = desktopId;
+                pData->directlyFound = true;
+                return FALSE;  // Stop enumeration
+            } else {
+                // Not on current — remove this desktop from candidates
+                auto& c = *pData->candidates;
+                c.erase(
+                    std::remove_if(c.begin(), c.end(),
+                        [&](const GUID& g) { return IsEqualGUID(g, desktopId); }),
+                    c.end()
+                );
+            }
+        }
+        
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&data));
+    
+    if (data.directlyFound) {
+        LOG_DEBUG("FindCurrentDesktopByElimination: direct match");
+        return data.foundId;
+    }
+    
+    // Process of elimination
+    if (allDesktops.size() == 1) {
+        wchar_t guidStr[64] = {};
+        StringFromGUID2(allDesktops[0], guidStr, 64);
+        LOG_DEBUG("FindCurrentDesktopByElimination: single candidate %ws", guidStr);
+        return allDesktops[0];
+    }
+    
+    LOG_DEBUG("FindCurrentDesktopByElimination: %zu candidates remain, cannot determine",
+              allDesktops.size());
+    return {};
+}
+
+void VirtualDesktop::UpdateTrackedForegroundWindow(const GUID& desktopId) {
+    if (!m_pPublicVirtualDesktopManager) {
+        return;
+    }
+    
+    HWND hFg = GetForegroundWindow();
+    if (hFg && IsWindow(hFg)) {
+        GUID fgDesktopId = {};
+        if (SUCCEEDED(m_pPublicVirtualDesktopManager->GetWindowDesktopId(hFg, &fgDesktopId)) &&
+            IsEqualGUID(fgDesktopId, desktopId)) {
+            m_lastKnownForegroundHwnd = hFg;
+            return;
+        }
+        // Foreground window might be pinned; check IsWindowOnCurrentVirtualDesktop
+        BOOL onCurrent = FALSE;
+        if (SUCCEEDED(m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(hFg, &onCurrent)) 
+            && onCurrent && !IsEqualGUID(fgDesktopId, GUID{})) {
+            m_lastKnownForegroundHwnd = hFg;
+            return;
+        }
+    }
+    
+    // Foreground window not usable — find any window on this desktop
+    struct EnumData {
+        IVirtualDesktopManager* pMgr;
+        GUID targetId;
+        HWND foundHwnd;
+    } data = { m_pPublicVirtualDesktopManager.Get(), desktopId, nullptr };
+    
+    EnumWindows([](HWND hw, LPARAM lp) -> BOOL {
+        auto* pData = reinterpret_cast<EnumData*>(lp);
+        if (!IsWindowVisible(hw)) return TRUE;
+        
+        GUID id = {};
+        if (SUCCEEDED(pData->pMgr->GetWindowDesktopId(hw, &id)) &&
+            IsEqualGUID(id, pData->targetId)) {
+            pData->foundHwnd = hw;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&data));
+    
+    m_lastKnownForegroundHwnd = data.foundHwnd;  // May be nullptr for empty desktops
+}
+
 void VirtualDesktop::SetDesktopSwitchCallback(DesktopSwitchCallback callback) {
     m_switchCallback = std::move(callback);
     
@@ -882,6 +1038,8 @@ void VirtualDesktop::SetDesktopSwitchCallback(DesktopSwitchCallback callback) {
     if (!IsEqualGUID(m_lastKnownDesktopId, GUID{})) {
         m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(m_lastKnownDesktopId);
         LOG_INFO("Initial desktop: index=%d", m_lastKnownDesktopIndex);
+        UpdateTrackedForegroundWindow(m_lastKnownDesktopId);
+        LOG_INFO("Tracked foreground window: %p", m_lastKnownForegroundHwnd);
     } else {
         m_lastKnownDesktopIndex = 1;
         LOG_WARN("Could not determine initial desktop ID");
@@ -919,15 +1077,16 @@ void VirtualDesktop::CheckDesktopChange() {
     if (pollCount % 200 == 1) {  // Every 200 * 150ms = 30s
         wchar_t guidStr[64] = {};
         StringFromGUID2(m_lastKnownDesktopId, guidStr, 64);
-        LOG_INFO("Desktop poll #%d - last known: index=%d guid=%ws", 
-                 pollCount, m_lastKnownDesktopIndex, guidStr);
+        LOG_INFO("Desktop poll #%d - last known: index=%d guid=%ws tracked=%p", 
+                 pollCount, m_lastKnownDesktopIndex, guidStr, m_lastKnownForegroundHwnd);
     }
     
     GUID currentDesktopId = {};
+    bool registryWorked = false;
     
     // Method 1: Use registry (most reliable, doesn't require windows on desktop)
     if (GetCurrentDesktopIdFromRegistry(currentDesktopId)) {
-        // Registry method worked
+        registryWorked = true;
     }
     // Method 2: Fallback to IVirtualDesktopManager API
     else if (m_pPublicVirtualDesktopManager) {
@@ -970,6 +1129,40 @@ void VirtualDesktop::CheckDesktopChange() {
         }
     }
     
+    // Method 3: Verify registry via IsWindowOnCurrentVirtualDesktop
+    // The registry CurrentVirtualDesktop value is not always updated when switching
+    // to a desktop with no windows. Cross-check using a tracked window from the
+    // last-known desktop: if that window is no longer on the current VD, the
+    // registry value is stale and we must identify the real desktop.
+    if (m_pPublicVirtualDesktopManager && m_lastKnownForegroundHwnd && IsWindow(m_lastKnownForegroundHwnd)) {
+        bool needsElimination = false;
+        
+        if (IsEqualGUID(currentDesktopId, m_lastKnownDesktopId)) {
+            // Registry says same desktop — verify with the tracked window
+            BOOL isOnCurrent = TRUE;
+            if (SUCCEEDED(m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
+                    m_lastKnownForegroundHwnd, &isOnCurrent)) && !isOnCurrent) {
+                LOG_INFO("Registry stale: tracked window not on current VD, running elimination");
+                needsElimination = true;
+            }
+        } else if (IsEqualGUID(currentDesktopId, GUID{})) {
+            // Couldn't determine desktop at all — check if we at least switched
+            BOOL isOnCurrent = TRUE;
+            if (SUCCEEDED(m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
+                    m_lastKnownForegroundHwnd, &isOnCurrent)) && !isOnCurrent) {
+                LOG_INFO("No desktop ID but tracked window moved, running elimination");
+                needsElimination = true;
+            }
+        }
+        
+        if (needsElimination) {
+            GUID eliminatedId = FindCurrentDesktopByElimination();
+            if (!IsEqualGUID(eliminatedId, GUID{})) {
+                currentDesktopId = eliminatedId;
+            }
+        }
+    }
+    
     // If we couldn't determine current desktop, skip this check
     if (IsEqualGUID(currentDesktopId, GUID{})) {
         if (pollCount % 200 == 1) {
@@ -989,8 +1182,11 @@ void VirtualDesktop::CheckDesktopChange() {
         m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(currentDesktopId);
         m_lastKnownDesktopName = GetDesktopNameFromRegistry(currentDesktopId);
         
-        LOG_INFO("Desktop change detected! old=%ws new=%ws index=%d", 
-                 oldGuid, newGuid, m_lastKnownDesktopIndex);
+        // Update the tracked window for the new desktop
+        UpdateTrackedForegroundWindow(currentDesktopId);
+        
+        LOG_INFO("Desktop change detected! old=%ws new=%ws index=%d tracked=%p", 
+                 oldGuid, newGuid, m_lastKnownDesktopIndex, m_lastKnownForegroundHwnd);
         OnDesktopSwitched();
     } else {
         // Same desktop — check if the name was changed (e.g. user renamed it)

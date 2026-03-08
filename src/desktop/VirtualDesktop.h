@@ -3,6 +3,7 @@
 #include "VirtualDesktopInterop.h"
 #include <functional>
 #include <string>
+#include <vector>
 #include <wrl/client.h>
 #include <ShObjIdl.h>  // For IVirtualDesktopManager (public API)
 
@@ -73,6 +74,9 @@ private:
     int GetDesktopIndexFromPolling(const GUID& desktopId);
     std::wstring GetDesktopNameFromRegistry(const GUID& desktopId);
     bool GetCurrentDesktopIdFromRegistry(GUID& desktopId);
+    std::vector<GUID> GetAllDesktopIdsFromRegistry();
+    GUID FindCurrentDesktopByElimination();
+    void UpdateTrackedForegroundWindow(const GUID& desktopId);
     std::wstring HStringToWString(HSTRING hstr);
 
     // Internal notification handler
@@ -106,6 +110,7 @@ private:
     GUID m_lastKnownDesktopId = {};
     int m_lastKnownDesktopIndex = 0;
     std::wstring m_lastKnownDesktopName;
+    HWND m_lastKnownForegroundHwnd = nullptr;  // Window tracked on last-known desktop
     
     // WinEvent hook for desktop switch detection
     HWINEVENTHOOK m_desktopSwitchHook = nullptr;
