@@ -35,6 +35,10 @@ public:
     bool IsInitialized() const { return m_initialized; }
     bool IsAvailable() const { return m_available; }
 
+    // Re-initialization (handles boot-time COM failures)
+    bool TryReinitialize();
+    static bool IsShellReady();
+
     // Desktop queries
     bool GetCurrentDesktop(DesktopInfo& info);
     int GetDesktopCount();
@@ -46,6 +50,9 @@ public:
     
     // Manual polling (called by App timer)
     void CheckDesktopChange();
+
+    // Move a window to the current virtual desktop (so it becomes visible)
+    bool MoveWindowToCurrentDesktop(HWND hwnd);
 
     // Expose version for debugging
     WindowsVirtualDesktopVersion GetWindowsVersion() const { return m_windowsVersion; }
@@ -92,6 +99,9 @@ private:
     bool m_available = false;
     bool m_comOwned = false;  // True if we called CoInitialize
     bool m_usingPolling = false;  // True if we're using polling instead of notifications
+    bool m_needsReinit = false;    // COM interfaces need (re-)acquisition (boot-time failure)
+    DWORD m_lastReinitAttemptTick = 0;
+    static constexpr DWORD REINIT_INTERVAL_MS = 3000;  // Retry interval for COM re-init
     WindowsVirtualDesktopVersion m_windowsVersion = WindowsVirtualDesktopVersion::Unknown;
     
     // COM interfaces - using IUnknown because specific type varies by Windows version

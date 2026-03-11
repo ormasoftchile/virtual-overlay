@@ -3,6 +3,7 @@
 #include "../utils/D2DRenderer.h"
 #include "../utils/Logger.h"
 #include "../utils/Monitor.h"
+#include "../desktop/VirtualDesktop.h"
 #include <algorithm>
 #include <regex>
 
@@ -127,6 +128,10 @@ void OverlayWindow::Show(int desktopIndex, const std::wstring& desktopName) {
 
     m_state.currentDesktopIndex = desktopIndex;
     m_state.currentDesktopName = desktopName;
+
+    // Move overlay window to the current virtual desktop so it's visible
+    // even when the target desktop has no other windows.
+    VirtualDesktop::Instance().MoveWindowToCurrentDesktop(m_hwnd);
 
     // Always update position (settings may have changed)
     UpdateWindowPosition();

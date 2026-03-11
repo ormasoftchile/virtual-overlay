@@ -71,3 +71,5 @@ Desktop.ini
 
 # Specification documents (internal use only)
 specs/
+# Squad
+.squad/

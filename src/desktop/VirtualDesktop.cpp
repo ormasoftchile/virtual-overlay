@@ -81,6 +81,35 @@ bool VirtualDesktop::Init() {
         }
     }
 
+    // Check if the shell (explorer.exe) is ready — virtual desktop COM
+    // interfaces depend on the shell and may not function during early boot
+    // even if CoCreateInstance succeeds (the DLL loads but the service isn't up).
+    if (!IsShellReady()) {
+        LOG_WARN("Shell not running yet (early boot?) — will retry COM init when shell is ready");
+        m_needsReinit = true;
+    } else if (m_pPublicVirtualDesktopManager) {
+        // Shell is running — verify the interface is actually functional
+        HWND hShell = GetShellWindow();
+        if (hShell) {
+            BOOL isOnCurrent = FALSE;
+            HRESULT hrCheck = m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
+                hShell, &isOnCurrent);
+            if (FAILED(hrCheck)) {
+                LOG_WARN("IVirtualDesktopManager acquired but not functional (0x%08X) — will retry",
+                         hrCheck);
+                m_pPublicVirtualDesktopManager.Reset();
+                m_available = false;
+                m_usingPolling = false;
+                m_needsReinit = true;
+            }
+        }
+    }
+
+    // If no interfaces are available at all, still mark for reinit as a safety net
+    if (!m_available && !m_needsReinit) {
+        m_needsReinit = true;
+    }
+
     // Verify registry-based detection works
     GUID testGuid = {};
     if (GetCurrentDesktopIdFromRegistry(testGuid)) {
@@ -127,6 +156,7 @@ void VirtualDesktop::Shutdown() {
     m_initialized = false;
     m_available = false;
     m_usingPolling = false;
+    m_needsReinit = false;
     LOG_INFO("VirtualDesktop shutdown complete");
 }
 
@@ -152,6 +182,74 @@ bool VirtualDesktop::InitializeCOM() {
     } else {
         LOG_ERROR("Failed to initialize COM: 0x%08X", hr);
         return false;
+    }
+
+    return true;
+}
+
+bool VirtualDesktop::IsShellReady() {
+    return GetShellWindow() != nullptr;
+}
+
+bool VirtualDesktop::TryReinitialize() {
+    // Throttle attempts — don't hammer COM creation every 150ms poll
+    DWORD now = GetTickCount();
+    if (now - m_lastReinitAttemptTick < REINIT_INTERVAL_MS) {
+        return false;
+    }
+    m_lastReinitAttemptTick = now;
+
+    if (!IsShellReady()) {
+        return false;
+    }
+
+    LOG_INFO("Shell is ready — attempting virtual desktop COM re-initialization...");
+
+    // Acquire public IVirtualDesktopManager if we don't have it
+    if (!m_pPublicVirtualDesktopManager) {
+        HRESULT hr = CoCreateInstance(
+            CLSID_VirtualDesktopManager,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&m_pPublicVirtualDesktopManager)
+        );
+        if (FAILED(hr)) {
+            LOG_WARN("Reinit: CoCreateInstance for IVirtualDesktopManager failed: 0x%08X", hr);
+            return false;
+        }
+        LOG_INFO("Reinit: IVirtualDesktopManager created");
+    }
+
+    // Verify the interface is actually functional
+    HWND hShell = GetShellWindow();
+    if (hShell) {
+        BOOL isOnCurrent = FALSE;
+        HRESULT hr = m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
+            hShell, &isOnCurrent);
+        if (FAILED(hr)) {
+            LOG_WARN("Reinit: IVirtualDesktopManager still not functional: 0x%08X", hr);
+            m_pPublicVirtualDesktopManager.Reset();
+            return false;
+        }
+    }
+
+    m_usingPolling = true;
+    m_available = true;
+    m_needsReinit = false;
+
+    // Refresh tracked desktop state
+    if (GetCurrentDesktopIdFromRegistry(m_lastKnownDesktopId)) {
+        m_lastKnownDesktopIndex = GetDesktopIndexFromPolling(m_lastKnownDesktopId);
+        m_lastKnownDesktopName = GetDesktopNameFromRegistry(m_lastKnownDesktopId);
+        UpdateTrackedForegroundWindow(m_lastKnownDesktopId);
+    }
+
+    LOG_INFO("Virtual desktop re-initialization successful (index=%d, name=%ws, tracked=%p)",
+             m_lastKnownDesktopIndex, m_lastKnownDesktopName.c_str(), m_lastKnownForegroundHwnd);
+
+    // Force-update the overlay with correct desktop info
+    if (m_switchCallback) {
+        m_switchCallback(m_lastKnownDesktopIndex, m_lastKnownDesktopName);
     }
 
     return true;
@@ -1020,7 +1118,13 @@ void VirtualDesktop::UpdateTrackedForegroundWindow(const GUID& desktopId) {
         return TRUE;
     }, reinterpret_cast<LPARAM>(&data));
     
-    m_lastKnownForegroundHwnd = data.foundHwnd;  // May be nullptr for empty desktops
+    // If no window was found (empty desktop), keep the previous tracked window.
+    // This allows stale-registry detection to keep working on subsequent switches.
+    if (!data.foundHwnd && m_lastKnownForegroundHwnd && IsWindow(m_lastKnownForegroundHwnd)) {
+        LOG_DEBUG("Empty desktop: keeping previously tracked window %p", m_lastKnownForegroundHwnd);
+    } else {
+        m_lastKnownForegroundHwnd = data.foundHwnd;
+    }
 }
 
 void VirtualDesktop::SetDesktopSwitchCallback(DesktopSwitchCallback callback) {
@@ -1069,6 +1173,11 @@ void CALLBACK VirtualDesktop::WinEventProc(HWINEVENTHOOK, DWORD event, HWND, LON
 void VirtualDesktop::CheckDesktopChange() {
     if (!m_switchCallback) {
         return;
+    }
+
+    // Re-acquire COM interfaces if they weren't available at startup (boot-time)
+    if (m_needsReinit) {
+        TryReinitialize();
     }
     
     // Periodic log to confirm polling is active (every ~30 seconds)
@@ -1131,34 +1240,51 @@ void VirtualDesktop::CheckDesktopChange() {
     
     // Method 3: Verify registry via IsWindowOnCurrentVirtualDesktop
     // The registry CurrentVirtualDesktop value is not always updated when switching
-    // to a desktop with no windows. Cross-check using a tracked window from the
-    // last-known desktop: if that window is no longer on the current VD, the
-    // registry value is stale and we must identify the real desktop.
+    // to a desktop with no windows. Cross-check using a tracked window from a
+    // previous desktop: if that window's visibility status contradicts the registry,
+    // the registry is stale and we must identify the real desktop via elimination.
     if (m_pPublicVirtualDesktopManager && m_lastKnownForegroundHwnd && IsWindow(m_lastKnownForegroundHwnd)) {
-        bool needsElimination = false;
+        BOOL trackedIsOnCurrent = TRUE;
+        bool trackedCheckOK = SUCCEEDED(m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
+            m_lastKnownForegroundHwnd, &trackedIsOnCurrent));
         
-        if (IsEqualGUID(currentDesktopId, m_lastKnownDesktopId)) {
-            // Registry says same desktop — verify with the tracked window
-            BOOL isOnCurrent = TRUE;
-            if (SUCCEEDED(m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
-                    m_lastKnownForegroundHwnd, &isOnCurrent)) && !isOnCurrent) {
+        if (trackedCheckOK) {
+            bool needsElimination = false;
+            
+            if (IsEqualGUID(currentDesktopId, m_lastKnownDesktopId) && !trackedIsOnCurrent) {
+                // Registry says same desktop, but tracked window is gone → we moved
                 LOG_INFO("Registry stale: tracked window not on current VD, running elimination");
                 needsElimination = true;
-            }
-        } else if (IsEqualGUID(currentDesktopId, GUID{})) {
-            // Couldn't determine desktop at all — check if we at least switched
-            BOOL isOnCurrent = TRUE;
-            if (SUCCEEDED(m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(
-                    m_lastKnownForegroundHwnd, &isOnCurrent)) && !isOnCurrent) {
+            } else if (IsEqualGUID(currentDesktopId, GUID{}) && !trackedIsOnCurrent) {
+                // No desktop ID from registry/windows, but tracked window moved
                 LOG_INFO("No desktop ID but tracked window moved, running elimination");
                 needsElimination = true;
+            } else if (!IsEqualGUID(currentDesktopId, m_lastKnownDesktopId) 
+                       && !IsEqualGUID(currentDesktopId, GUID{})) {
+                // Registry says we moved to a different desktop — verify it
+                // The tracked window being on current VD means we're on its desktop
+                if (trackedIsOnCurrent) {
+                    // Tracked window IS on current — trust it, but the registry GUID
+                    // might not match. Get the tracked window's actual desktop ID.
+                    GUID trackedDesktopId = {};
+                    m_pPublicVirtualDesktopManager->GetWindowDesktopId(
+                        m_lastKnownForegroundHwnd, &trackedDesktopId);
+                    if (!IsEqualGUID(trackedDesktopId, GUID{})) {
+                        currentDesktopId = trackedDesktopId;
+                    }
+                } else {
+                    // Tracked window NOT on current, and registry says different desktop
+                    // from lastKnown — verify the registry's claim via elimination
+                    LOG_INFO("Registry says different desktop but tracked disagrees, verifying");
+                    needsElimination = true;
+                }
             }
-        }
-        
-        if (needsElimination) {
-            GUID eliminatedId = FindCurrentDesktopByElimination();
-            if (!IsEqualGUID(eliminatedId, GUID{})) {
-                currentDesktopId = eliminatedId;
+            
+            if (needsElimination) {
+                GUID eliminatedId = FindCurrentDesktopByElimination();
+                if (!IsEqualGUID(eliminatedId, GUID{})) {
+                    currentDesktopId = eliminatedId;
+                }
             }
         }
     }
@@ -1204,11 +1330,40 @@ void VirtualDesktop::OnDesktopSwitched() {
         return;
     }
 
-    DesktopInfo info;
-    if (GetCurrentDesktop(info)) {
-        LOG_DEBUG("Desktop switched to: %d (%ws)", info.index, info.name.c_str());
-        m_switchCallback(info.index, info.name);
+    // Use the already-computed cached values from CheckDesktopChange rather than
+    // re-querying GetCurrentDesktop, which may read stale registry data when the
+    // target desktop has no windows.
+    LOG_DEBUG("Desktop switched to: %d (%ws)", m_lastKnownDesktopIndex, m_lastKnownDesktopName.c_str());
+    m_switchCallback(m_lastKnownDesktopIndex, m_lastKnownDesktopName);
+}
+
+bool VirtualDesktop::MoveWindowToCurrentDesktop(HWND hwnd) {
+    if (!hwnd || !m_pPublicVirtualDesktopManager) {
+        return false;
     }
+
+    // Check if the window is already on the current virtual desktop
+    BOOL isOnCurrent = FALSE;
+    HRESULT hr = m_pPublicVirtualDesktopManager->IsWindowOnCurrentVirtualDesktop(hwnd, &isOnCurrent);
+    if (SUCCEEDED(hr) && isOnCurrent) {
+        return true;  // Already on current desktop
+    }
+
+    // Get current desktop ID and move the window there
+    GUID currentId = m_lastKnownDesktopId;
+    if (IsEqualGUID(currentId, GUID{})) {
+        GetCurrentDesktopIdFromRegistry(currentId);
+    }
+
+    if (!IsEqualGUID(currentId, GUID{})) {
+        hr = m_pPublicVirtualDesktopManager->MoveWindowToDesktop(hwnd, currentId);
+        if (SUCCEEDED(hr)) {
+            LOG_DEBUG("Moved window %p to current desktop", hwnd);
+            return true;
+        }
+        LOG_WARN("MoveWindowToDesktop failed: 0x%08X", hr);
+    }
+    return false;
 }
 
 // =============================================================================
