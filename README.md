@@ -21,15 +21,38 @@ A lightweight Windows utility that displays an overlay showing your current virt
 
 ## Installation
 
-### MSI Installer (Recommended)
+### Scoop (Recommended)
+```powershell
+scoop bucket add virtual-overlay https://github.com/ormasoftchile/virtual-overlay
+scoop install virtual-overlay
+```
+
+Auto-updates with `scoop update virtual-overlay`.
+
+### Quick Install (PowerShell)
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ormasoftchile/virtual-overlay/main/install.ps1 | iex"
+```
+
+Installs to `%LocalAppData%\VirtualOverlay\`. To uninstall:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/ormasoftchile/virtual-overlay/main/uninstall.ps1 | iex"
+```
+
+### MSI Installer
 Download the latest `VirtualOverlay.msi` from [Releases](https://github.com/ormasoftchile/virtual-overlay/releases).
 
 - Per-user installation (no admin required)
 - Adds to Windows startup automatically
 - Installs to `%LocalAppData%\VirtualOverlay`
 
-### Portable
-Download `virtual-overlay.exe` and run directly.
+### Portable (ZIP)
+Download `VirtualOverlay-portable.zip` from [Releases](https://github.com/ormasoftchile/virtual-overlay/releases) and extract. No SmartScreen prompts.
+
+### Portable (EXE)
+Download `virtual-overlay.exe` from [Releases](https://github.com/ormasoftchile/virtual-overlay/releases) and run directly.
+
+> **Note:** The EXE is not code-signed yet. If Windows SmartScreen shows "Unknown publisher," click **More info** → **Run anyway**. The ZIP and Scoop methods avoid this warning entirely.
 
 ## Usage
 
