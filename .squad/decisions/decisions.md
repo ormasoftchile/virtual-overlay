@@ -118,3 +118,108 @@ A user can have any of these mismatched states:
 2. Confirm whether the installed binary path matches the Run value target.
 3. Check whether `virtual-overlay.exe` is running at logon even when no tray icon appears.
 4. Determine which installer family was used on the affected machine.
+
+---
+
+## 2026-05-02: Installer release path and Run key fix
+
+Date: 2026-05-02
+Requested by: Cristian Ormazabal
+Author: Anne Westphall
+
+### Decision
+
+Make `installer/Package.wxs` the documented release MSI path and quote the HKCU `Run` value target as `&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;`.
+
+### Why
+
+Signed releases installed from the wrong MSI family missed autostart registration entirely, and even the correct per-user installer would fail to launch at logon if `%LocalAppData%` contained spaces in the user profile path.
+
+### Scope
+
+- Update `installer/Package.wxs` so the `Run` key data is quoted for shell parsing.
+- Rewrite `installer/README.md` build instructions to require building `Package.wxs` only.
+- Preserve existing non-build guidance such as prerequisites, assets, testing notes, and other reference material.
+
+### Result
+
+Release documentation now points to `wix build Package.wxs -o VirtualOverlay.msi`, calls out `%LocalAppData%\VirtualOverlay\` as the install path, states that autostart is created at install time, and warns not to build deprecated `Product.wxs` or `UI.wxs`.
+
+---
+
+## 2026-05-02: Installer Consolidation
+
+Date: 2026-05-02
+Requested by: Cristian Ormazabal
+Author: Icer Addis
+
+### Context
+
+The shipped signed MSI came from the legacy manual `Product.wxs` path, while CI has long produced the per-user `Package.wxs` MSI. The two installers are different Windows products because they use different `UpgradeCode` values. That split is the source of the release/process confusion and the missing auto-start behavior.
+
+### Decisions
+
+#### 1) `Product.wxs` disposition
+**Keep it in-tree, but explicitly deprecate it and remove it from the supported release path.**
+
+Reasoning:
+- `Product.wxs` represents a distinct MSI product family because it has a different `UpgradeCode` than `Package.wxs`.
+- Deleting it immediately would discard the most concrete reference for the legacy product identity if we later choose to author a cleanup or migration experience.
+- It should no longer be treated as a valid build target for releases. Its role is archival/reference-only until the team decides whether to ship an explicit migration/uninstall bridge.
+
+Scope boundary:
+- No further feature work should land in `Product.wxs`.
+- Mark it as legacy/deprecated in docs/comments.
+- Supported releases should standardize on `Package.wxs` only.
+
+#### 2) `UI.wxs` disposition
+**Deprecate it alongside `Product.wxs` and treat it as legacy-only.**
+
+Reasoning:
+- `UI.wxs` exists only to extend the legacy `Product.wxs` flow.
+- Its launch-on-exit and cleanup behavior are not part of the supported installer architecture once `Package.wxs` becomes the only release definition.
+- Keeping it as an archival companion to `Product.wxs` preserves historical context without implying that it remains part of the shipping path.
+
+#### 3) `Package.wxs` Run key quoting
+**Yes, quote the executable path in the Run value.**
+
+Required form:
+- `Value="&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;"`
+
+Reasoning:
+- `[INSTALLFOLDER]` resolves under `%LOCALAPPDATA%`, which lives under the user profile path.
+- Windows profile directory names can contain spaces, so `LocalAppData`-based paths are not guaranteed to be space-free.
+- Unquoted Run entries are parsed by the shell/process creation rules as command lines, not as raw paths, so a space-bearing profile path can break startup.
+
+Architecture note:
+- Quoting the executable path is the correct default even when the current machine's profile path has no spaces.
+
+#### 4) `installer/README.md` update scope
+**Rewrite the README so it documents only the supported installer flow.**
+
+It should say:
+- Build **`installer/Package.wxs`** for release candidates and signed releases.
+- Use the WiX CLI command that matches the current repo flow, e.g. from `installer/`:
+  - `wix build Package.wxs -o VirtualOverlay.msi`
+- Expected install location:
+  - `%LOCALAPPDATA%\VirtualOverlay`
+- Installer behavior note:
+  - The installer is **per-user** and writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\VirtualOverlay` so the app starts at logon.
+- Signing note:
+  - CI can build the unsigned MSI artifact, but the release MSI is built and code-signed locally before manual upload/publication.
+- Legacy note:
+  - `Product.wxs` and `UI.wxs` are deprecated legacy assets and are not the supported release path.
+
+#### 5) `.github/workflows/build.yml` release trigger
+**Leave the tag trigger alone for this consolidation; do not widen it right now.**
+
+Reasoning:
+- Releases are effectively manual because signing happens locally, not in CI.
+- Broadening the trigger to `refs/tags/*` would increase the chance of CI creating unsigned/tag-driven releases that do not match the real shipping process.
+- The real issue here is installer-source selection, not GitHub tag automation.
+
+Follow-up recommendation:
+- Revisit tag semantics only when the release process itself is redesigned (for example, if signed artifacts or a deliberate draft-release workflow become CI-driven).
+
+### Outcome
+The supported installer architecture should be a single per-user MSI path built from `Package.wxs`; the legacy `Product.wxs`/`UI.wxs` pair remains only as deprecated reference material until the team decides whether to author an explicit migration story for past installs.

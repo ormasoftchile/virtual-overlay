@@ -30,7 +30,7 @@
                                    Key="Software\Microsoft\Windows\CurrentVersion\Run"
                                    Name="VirtualOverlay"
                                    Type="string"
-                                   Value="[INSTALLFOLDER]virtual-overlay.exe"
+                                   Value="&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;"
                                    KeyPath="no" />
                 </Component>
             </Directory>

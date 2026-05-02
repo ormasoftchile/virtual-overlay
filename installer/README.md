@@ -12,30 +12,27 @@ This directory contains WiX v4 MSI installer definition files.
 
 | File | Description |
 |------|-------------|
-| `Product.wxs` | Main MSI definition with components and features |
-| `UI.wxs` | UI customization and launch-on-exit behavior |
+| `Package.wxs` | Release MSI definition. Build this file for all release installers. |
+| `Product.wxs` | ⚠️ Deprecated and not used for releases. Do not build this file. |
+| `UI.wxs` | ⚠️ Deprecated and not used for releases. Do not build this file. |
 | `License.rtf` | License agreement (create before build) |
 | `banner.bmp` | 493x58 banner image for dialog headers |
 | `dialog.bmp` | 493x312 background image for welcome dialog |
 
 ## Building the MSI
 
-### Option 1: Using WiX CLI (wix.exe)
+Build `Package.wxs` only. It is the only installer definition used for releases.
+
+⚠️ `Product.wxs` and `UI.wxs` are deprecated and not used for releases. Do not build these.
 
 ```powershell
-# From repository root
-wix build installer/Product.wxs installer/UI.wxs `
-    -d BuildDir=build/Release `
-    -ext WixToolset.UI.wixext `
-    -o build/VirtualOverlay-1.0.0.msi
+# From the installer/ directory
+wix build Package.wxs -o VirtualOverlay.msi
 ```
 
-### Option 2: Using dotnet
+Expected install location: `%LocalAppData%\VirtualOverlay\`
 
-```powershell
-# Create a wixproj file first, then:
-dotnet build installer/VirtualOverlay.Installer.wixproj -c Release
-```
+Autostart is registered during install by writing the current user `Run` key. No manual registration is required.
 
 ## Required Assets (Before Building)
 
