@@ -6,7 +6,16 @@
              UpgradeCode="F8E3B5A1-7C2D-4E9F-B6A8-3D1C5E7F9A2B"
              Scope="perUser">
 
-        <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+        <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                      AllowSameVersionUpgrades="yes" />
+
+        <util:CloseApplication xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+                               Id="CloseVO"
+                               Target="virtual-overlay.exe"
+                               CloseMessage="yes"
+                               ElevatedCloseMessage="no"
+                               TerminateProcess="500"
+                               RebootPrompt="no" />
 
         <Media Id="1" Cabinet="VirtualOverlay.cab" EmbedCab="yes" />
 
