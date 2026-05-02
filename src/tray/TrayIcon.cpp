@@ -99,17 +99,37 @@ void TrayIcon::Shutdown() {
     LOG_INFO("TrayIcon shutdown");
 }
 
+bool TrayIcon::AddIcon() {
+    if (!Shell_NotifyIconW(NIM_ADD, &m_nid)) {
+        LOG_ERROR("Failed to add tray icon: %lu", GetLastError());
+        return false;
+    }
+
+    if (!Shell_NotifyIconW(NIM_SETVERSION, &m_nid)) {
+        LOG_WARN("Failed to set tray icon version: %lu", GetLastError());
+    }
+
+    m_visible = true;
+    return true;
+}
+
 void TrayIcon::Show() {
     if (!m_initialized || m_visible) {
         return;
     }
 
-    if (Shell_NotifyIconW(NIM_ADD, &m_nid)) {
-        Shell_NotifyIconW(NIM_SETVERSION, &m_nid);
-        m_visible = true;
+    if (AddIcon()) {
         LOG_DEBUG("Tray icon shown");
-    } else {
-        LOG_ERROR("Failed to add tray icon: %lu", GetLastError());
+    }
+}
+
+void TrayIcon::Restore() {
+    if (!m_initialized) {
+        return;
+    }
+
+    if (AddIcon()) {
+        LOG_INFO("Tray icon restored after shell restart");
     }
 }
 

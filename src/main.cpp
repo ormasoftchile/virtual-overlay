@@ -30,6 +30,7 @@ int RunMessageLoop();
 // Global handles
 static HWND g_hMainWnd = nullptr;
 static HINSTANCE g_hInstance = nullptr;
+static const UINT WM_TASKBARCREATED = RegisterWindowMessageW(L"TaskbarCreated");
 
 int WINAPI WinMain(
     _In_ HINSTANCE hInstance,
@@ -80,6 +81,8 @@ int WINAPI WinMain(
                 // Initialize application controller
                 if (VirtualOverlay::App::Instance().Init(hInstance, g_hMainWnd)) {
                     LOG_INFO("Application initialized successfully");
+
+                    PostMessageW(g_hMainWnd, VirtualOverlay::WM_APP_INIT_TRAY, 0, 0);
 
                     // Run message loop
                     exitCode = RunMessageLoop();
@@ -167,6 +170,11 @@ int RunMessageLoop() {
 }
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_TASKBARCREATED) {
+        VirtualOverlay::TrayIcon::Instance().Restore();
+        return 0;
+    }
+
     switch (msg) {
         case WM_CREATE:
             return 0;
@@ -187,6 +195,10 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             // Another instance tried to start - could open settings here
             LOG_DEBUG("Received bring-to-front request from another instance");
             VirtualOverlay::App::Instance().OpenSettings();
+            return 0;
+
+        case VirtualOverlay::WM_APP_INIT_TRAY:
+            VirtualOverlay::TrayIcon::Instance().Show();
             return 0;
 
         case VirtualOverlay::WM_TRAYICON:

@@ -6,7 +6,8 @@
 
 namespace VirtualOverlay {
 
-// Custom message for tray icon
+// Custom messages for tray icon lifecycle and callbacks
+constexpr UINT WM_APP_INIT_TRAY = WM_APP + 1;
 constexpr UINT WM_TRAYICON = WM_USER + 300;
 
 // Menu item IDs
@@ -28,6 +29,7 @@ public:
     // Show/hide tray icon
     void Show();
     void Hide();
+    void Restore();
     bool IsVisible() const { return m_visible; }
 
     // Update tooltip
@@ -49,6 +51,7 @@ private:
     TrayIcon& operator=(const TrayIcon&) = delete;
 
     // Show context menu
+    bool AddIcon();
     void ShowContextMenu();
 
     // Auto-start helpers

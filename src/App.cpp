@@ -607,10 +607,7 @@ bool App::InitTrayIcon() {
         PostMessageW(m_hMainWnd, WM_CLOSE, 0, 0);
     });
 
-    // Show tray icon
-    TrayIcon::Instance().Show();
-
-    LOG_INFO("Tray icon initialized and shown");
+    LOG_INFO("Tray icon initialized; show deferred to message loop");
     return true;
 }
 
