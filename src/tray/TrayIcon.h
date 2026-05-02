@@ -9,6 +9,7 @@ namespace VirtualOverlay {
 // Custom messages for tray icon lifecycle and callbacks
 constexpr UINT WM_APP_INIT_TRAY = WM_APP + 1;
 constexpr UINT WM_TRAYICON = WM_USER + 300;
+constexpr UINT TIMER_TRAY_RETRY = 200;
 
 // Menu item IDs
 constexpr UINT IDM_TRAY_SETTINGS = 1001;
@@ -30,6 +31,7 @@ public:
     void Show();
     void Hide();
     void Restore();
+    void OnRetryTimer();
     bool IsVisible() const { return m_visible; }
 
     // Update tooltip
@@ -65,6 +67,9 @@ private:
     HMENU m_hMenu = nullptr;
     bool m_initialized = false;
     bool m_visible = false;
+    static constexpr int MAX_TRAY_RETRIES = 10;
+    static constexpr UINT TRAY_RETRY_INTERVAL_MS = 1000;
+    int m_addRetryCount = 0;
 
     // Callbacks
     MenuCallback m_onSettings;

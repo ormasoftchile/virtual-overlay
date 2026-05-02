@@ -188,6 +188,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 VirtualOverlay::App::Instance().OnZoomTimer();
             } else if (wParam == VirtualOverlay::TIMER_DESKTOP_POLL) {
                 VirtualOverlay::App::Instance().OnDesktopPollTimer();
+            } else if (wParam == VirtualOverlay::TIMER_TRAY_RETRY) {
+                VirtualOverlay::TrayIcon::Instance().OnRetryTimer();
             }
             return 0;
 

@@ -14,6 +14,7 @@
 - `AppConfig` defaults come from the struct member initializers in `src/config/Config.h`; `Config::Reset()` rehydrates them via `m_config = AppConfig{}`, so changing overlay defaults there affects only fresh or missing configs.
 - Tray startup currently runs through `WinMain -> App::Init() -> App::InitTrayIcon() -> TrayIcon::Show()` before the main message loop starts; the hidden owner window uses `WS_EX_TOOLWINDOW`, so no taskbar button is expected, and tray registration is only a one-shot `Shell_NotifyIconW(NIM_ADD)` with no retry or `TaskbarCreated` recovery.
 - The tray icon is now queued with `PostMessageW(hwnd, WM_APP_INIT_TRAY, ...)` after app init, and the hidden main window also listens for the registered `TaskbarCreated` broadcast to re-add the icon after Explorer restarts.
+- `Shell_NotifyIconW(NIM_ADD)` can fail during early post-install startup before the notification area is ready; `TrayIcon::AddIcon()` now arms a 1s window timer (`TIMER_TRAY_RETRY`) and retries up to 10 times through `MainWndProc` instead of failing permanently.
 
 ## Cross-Agent Notes (2026-05-02)
 
