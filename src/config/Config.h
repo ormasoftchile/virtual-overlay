@@ -96,8 +96,8 @@ struct OverlayAnimationConfig {
 // Overlay settings
 struct OverlayConfig {
     bool enabled = true;
-    OverlayMode mode = OverlayMode::Notification;
-    OverlayPosition position = OverlayPosition::TopCenter;
+    OverlayMode mode = OverlayMode::Watermark;
+    OverlayPosition position = OverlayPosition::TopRight;
     bool showDesktopNumber = true;
     bool showDesktopName = true;
     std::wstring format = L"{number}: {name}";
@@ -109,7 +109,7 @@ struct OverlayConfig {
     int watermarkFontSize = 120;
     float watermarkOpacity = 0.25f;
     bool watermarkShadow = false;
-    uint32_t watermarkColor = 0xFFFFFF;  // White by default
+    uint32_t watermarkColor = 0x00FF00;  // Lime by default
     
     // Dodge mode - move overlay when mouse approaches
     bool dodgeOnHover = false;

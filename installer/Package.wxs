@@ -38,9 +38,19 @@
 
         <StandardDirectory Id="ProgramMenuFolder" />
 
+        <CustomAction Id="LaunchApp"
+                      Directory="INSTALLFOLDER"
+                      ExeCommand="&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;"
+                      Execute="immediate"
+                      Return="asyncNoWait" />
+
         <Feature Id="MainFeature" Title="Virtual Overlay" Level="1">
             <ComponentRef Id="MainExecutable" />
         </Feature>
+
+        <InstallExecuteSequence>
+            <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT Installed" />
+        </InstallExecuteSequence>
 
     </Package>
 </Wix>
