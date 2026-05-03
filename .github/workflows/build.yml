@@ -34,7 +34,7 @@ jobs:
     - name: Build MSI Installer
       working-directory: installer
       run: |
-        wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
+        wix build Package.wxs -ext WixToolset.Util.wixext/5.0.1 -o VirtualOverlay.msi
 
     - name: Upload MSI Artifact
       uses: actions/upload-artifact@v4
