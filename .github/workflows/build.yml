@@ -21,7 +21,7 @@ jobs:
     - name: Setup WiX
       run: |
         dotnet tool install --global wix --version 5.0.1
-        wix extension add WixToolset.Util.wixext
+        wix extension add WixToolset.Util.wixext/5.0.1
 
     - name: Create build directory
       run: |
