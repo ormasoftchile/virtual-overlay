@@ -32,19 +32,14 @@ jobs:
     - name: Build MSI Installer
       working-directory: installer
       run: |
-        wix build Package.wxs -o VirtualOverlay.msi
+        wix extension add WixToolset.Util.wixext/5.0.1
+        wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 
     - name: Upload MSI Artifact
       uses: actions/upload-artifact@v4
       with:
         name: VirtualOverlay-Installer
         path: installer/VirtualOverlay.msi
-
-    - name: Upload EXE Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: VirtualOverlay-Portable
-        path: build/Release/virtual-overlay.exe
 
   release:
     needs: build
@@ -60,15 +55,9 @@ jobs:
       with:
         name: VirtualOverlay-Installer
 
-    - name: Download EXE
-      uses: actions/download-artifact@v4
-      with:
-        name: VirtualOverlay-Portable
-
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
           VirtualOverlay.msi
-          virtual-overlay.exe
         generate_release_notes: true

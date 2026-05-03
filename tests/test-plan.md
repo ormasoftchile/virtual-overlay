@@ -5,118 +5,73 @@
 
 ## Overview
 
-This document describes manual test procedures for verifying all Virtual Overlay features prior to release.
+This document describes manual test procedures for verifying Virtual Overlay overlay, watermark, tray, and virtual desktop features prior to release.
 
 ## Prerequisites
 
 - Windows 10 version 1803 or later, or Windows 11
 - At least one monitor (multi-monitor recommended for full testing)
-- Multiple virtual desktops created (Win+Tab → New Desktop)
+- Multiple virtual desktops created (Win+Tab  New Desktop)
 
 ## Test Categories
 
-1. [Zoom Feature Tests](#1-zoom-feature-tests)
-2. [Overlay Feature Tests](#2-overlay-feature-tests)
-3. [Settings Window Tests](#3-settings-window-tests)
-4. [Tray Icon Tests](#4-tray-icon-tests)
-5. [Multi-Monitor Tests](#5-multi-monitor-tests)
-6. [Edge Cases and Error Handling](#6-edge-cases-and-error-handling)
+1. [Overlay Feature Tests](#1-overlay-feature-tests)
+2. [Settings Window Tests](#2-settings-window-tests)
+3. [Tray Icon Tests](#3-tray-icon-tests)
+4. [Multi-Monitor Tests](#4-multi-monitor-tests)
+5. [Edge Cases and Error Handling](#5-edge-cases-and-error-handling)
 
 ---
 
-## 1. Zoom Feature Tests
+## 1. Overlay Feature Tests
 
-### 1.1 Basic Zoom In/Out
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Hold Ctrl key | No visual change |
-| 2 | While holding Ctrl, scroll mouse wheel down | Screen zooms in, centered on cursor |
-| 3 | Continue scrolling down | Zoom level increases |
-| 4 | Scroll mouse wheel up (still holding Ctrl) | Screen zooms out |
-| 5 | Release Ctrl key | Zoom level maintained |
-
-**Pass**: [ ] **Fail**: [ ]
-
-### 1.2 Cursor-Following Pan
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Zoom in to 2x or higher | Screen magnified |
-| 2 | Move cursor to right edge | View pans right to follow cursor |
-| 3 | Move cursor to bottom edge | View pans down to follow cursor |
-| 4 | Move cursor to top-left | View pans to top-left |
-
-**Pass**: [ ] **Fail**: [ ]
-
-### 1.3 Double-Tap Reset
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Zoom in to any level | Screen magnified |
-| 2 | Double-tap Ctrl key quickly | Zoom resets to 1.0x (no zoom) |
-| 3 | Verify timing: taps must be within 300ms | Reset occurs only if taps are quick |
-
-**Pass**: [ ] **Fail**: [ ]
-
-### 1.4 Touchpad Pinch (if touchpad available)
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Pinch outward on touchpad | Screen zooms in |
-| 2 | Pinch inward on touchpad | Screen zooms out |
-
-**Pass**: [ ] **Fail**: [ ] **N/A**: [ ]
-
----
-
-## 2. Overlay Feature Tests
-
-### 2.1 Basic Overlay Display
+### 1.1 Basic Overlay Display
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Create at least 2 virtual desktops (Win+Tab) | Desktops created |
 | 2 | Press Win+Ctrl+Right Arrow | Overlay appears showing "2: Desktop Name" |
-| 3 | Wait 2 seconds | Overlay fades out automatically |
+| 3 | Wait 2 seconds | Notification overlay fades out automatically |
 | 4 | Press Win+Ctrl+Left Arrow | Overlay shows "1: Desktop 1" |
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 2.2 Rapid Desktop Switching
+### 1.2 Watermark Mode
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Rapidly switch desktops (Win+Ctrl+Arrow×3) | Overlay updates each time, no flicker |
-| 2 | Final overlay shows correct desktop | Correct number/name |
+| 1 | Open Settings > Overlay tab | Overlay settings visible |
+| 2 | Set Mode to Watermark and click Apply | Setting saved |
+| 3 | Observe desktop | Watermark remains visible |
+| 4 | Switch virtual desktops | Watermark text updates to the current desktop |
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 2.3 Overlay Animation
+### 1.3 Overlay Hotkey
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Switch desktops | Overlay fades in smoothly (150ms) |
-| 2 | After display period | Overlay fades out smoothly (200ms) |
-| 3 | Slide-in animation visible | Overlay slides up slightly while fading in |
+| 1 | Ensure overlay is enabled | Overlay visible or available |
+| 2 | Press Ctrl+Shift+D | Overlay toggles visibility |
+| 3 | Press Ctrl+Shift+D again | Overlay toggles back |
 
 **Pass**: [ ] **Fail**: [ ]
 
 ---
 
-## 3. Settings Window Tests
+## 2. Settings Window Tests
 
-### 3.1 Open Settings
+### 2.1 Open Settings
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Right-click tray icon | Context menu appears |
 | 2 | Click "Settings..." | Settings window opens |
-| 3 | Verify 4 tabs exist | General, Overlay, Zoom, About |
+| 3 | Verify 3 tabs exist | General, Overlay, About |
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 3.2 Change Overlay Position
+### 2.2 Change Overlay Position
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -128,19 +83,7 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 3.3 Change Zoom Settings
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Open Settings > Zoom tab | Zoom settings visible |
-| 2 | Change Modifier key to "Alt" | Selection changes |
-| 3 | Click "Apply" | Settings saved |
-| 4 | Test Alt+scroll | Zoom works with Alt key |
-| 5 | Change back to "Ctrl" and Apply | Original behavior restored |
-
-**Pass**: [ ] **Fail**: [ ]
-
-### 3.4 Cancel Discards Changes
+### 2.3 Cancel Discards Changes
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -153,9 +96,9 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 ---
 
-## 4. Tray Icon Tests
+## 3. Tray Icon Tests
 
-### 4.1 Tray Icon Visibility
+### 3.1 Tray Icon Visibility
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -164,7 +107,7 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 4.2 Context Menu
+### 3.2 Context Menu
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -175,43 +118,21 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 4.3 Exit Cleanup
+### 3.3 Exit Cleanup
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Zoom screen to 2x | Screen magnified |
+| 1 | Ensure overlay is visible | Overlay shown |
 | 2 | Click "Exit" from tray menu | Application closes |
-| 3 | Verify zoom is reset | Screen returns to normal |
-| 4 | Verify tray icon removed | Icon no longer in tray |
-
-**Pass**: [ ] **Fail**: [ ]
-
-### 4.4 Auto-Start
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Right-click tray icon | Menu appears |
-| 2 | Click "Start with Windows" | Checkmark appears |
-| 3 | Restart Windows (or check registry) | App launches on login |
-| 4 | Disable "Start with Windows" | Checkmark removed |
+| 3 | Verify tray icon removed | Icon no longer in tray |
 
 **Pass**: [ ] **Fail**: [ ]
 
 ---
 
-## 5. Multi-Monitor Tests
+## 4. Multi-Monitor Tests
 
-### 5.1 Zoom on Secondary Monitor
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Move cursor to secondary monitor | Cursor on secondary |
-| 2 | Ctrl+scroll to zoom | Zoom works on secondary monitor |
-| 3 | Pan to edges | View pans within screen bounds |
-
-**Pass**: [ ] **Fail**: [ ] **N/A**: [ ]
-
-### 5.2 Overlay on Cursor Monitor
+### 4.1 Overlay on Cursor Monitor
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -222,32 +143,22 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 **Pass**: [ ] **Fail**: [ ] **N/A**: [ ]
 
-### 5.3 Monitor Hotplug
+### 4.2 Monitor Hotplug
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Disconnect a monitor | Monitor removed |
-| 2 | Zoom and overlay still work | No crash, features work |
+| 2 | Overlay still works | No crash, feature works |
 | 3 | Reconnect monitor | Monitor restored |
-| 4 | Zoom on reconnected monitor | Works correctly |
+| 4 | Switch desktops again | Overlay appears correctly |
 
 **Pass**: [ ] **Fail**: [ ] **N/A**: [ ]
 
 ---
 
-## 6. Edge Cases and Error Handling
+## 5. Edge Cases and Error Handling
 
-### 6.1 Windows Magnifier Conflict
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Start Windows Magnifier (Win+Plus) | Magnifier running |
-| 2 | Check application logs | Warning logged |
-| 3 | Zoom may not work correctly | Expected behavior |
-
-**Pass**: [ ] **Fail**: [ ]
-
-### 6.2 Single Instance
+### 5.1 Single Instance
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -257,7 +168,7 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 6.3 Configuration File
+### 5.2 Configuration File
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -267,7 +178,7 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 6.4 DPI Changes
+### 5.3 DPI Changes
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -281,18 +192,9 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 ## Performance Verification
 
-### Memory Usage
-
 | Check | Target | Result |
 |-------|--------|--------|
 | Peak memory usage | < 50 MB | [ ] MB |
-| Memory after 1 hour idle | < 30 MB | [ ] MB |
-
-### Input Latency
-
-| Check | Target | Result |
-|-------|--------|--------|
-| Ctrl+scroll response | < 16ms | [ ] ms |
 | Desktop switch overlay | < 100ms | [ ] ms |
 
 ---
@@ -301,7 +203,6 @@ This document describes manual test procedures for verifying all Virtual Overlay
 
 | Category | Pass | Fail | N/A |
 |----------|------|------|-----|
-| Zoom Feature | | | |
 | Overlay Feature | | | |
 | Settings Window | | | |
 | Tray Icon | | | |

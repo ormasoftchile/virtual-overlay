@@ -24,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keyboard Shortcut** - Ctrl+Shift+D to toggle overlay visibility
 - **Desktop Names** - Reads custom names from Windows Settings
 - **Multi-Monitor Support** - Works with cursor, primary, or all monitors
-- **Zoom Feature** - Ctrl+Scroll to magnify screen content
 - **Settings UI** - Full settings dialog with live preview
 - **System Tray** - Minimize to tray with context menu
 - **MSI Installer** - Per-user installation, no admin required

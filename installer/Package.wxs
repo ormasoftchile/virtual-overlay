@@ -2,16 +2,26 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
     <Package Name="Virtual Overlay"
              Manufacturer="Virtual Overlay"
-             Version="1.0.0.0"
+             Version="1.0.1.0"
              UpgradeCode="F8E3B5A1-7C2D-4E9F-B6A8-3D1C5E7F9A2B"
              Scope="perUser">
 
-        <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+        <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                      AllowSameVersionUpgrades="yes" />
+
+        <util:CloseApplication xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+                               Id="CloseVO"
+                               Target="virtual-overlay.exe"
+                               CloseMessage="yes"
+                               ElevatedCloseMessage="no"
+                               TerminateProcess="500"
+                               RebootPrompt="no" />
 
         <Media Id="1" Cabinet="VirtualOverlay.cab" EmbedCab="yes" />
 
         <Icon Id="AppIcon" SourceFile="..\res\icon.ico" />
         <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+        <Property Id="ARPNOMODIFY" Value="1" />
 
         <StandardDirectory Id="LocalAppDataFolder">
             <Directory Id="INSTALLFOLDER" Name="VirtualOverlay">
@@ -30,7 +40,7 @@
                                    Key="Software\Microsoft\Windows\CurrentVersion\Run"
                                    Name="VirtualOverlay"
                                    Type="string"
-                                   Value="[INSTALLFOLDER]virtual-overlay.exe"
+                                   Value="&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;"
                                    KeyPath="no" />
                 </Component>
             </Directory>
@@ -38,9 +48,19 @@
 
         <StandardDirectory Id="ProgramMenuFolder" />
 
+        <CustomAction Id="LaunchApp"
+                      Directory="INSTALLFOLDER"
+                      ExeCommand="&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;"
+                      Execute="immediate"
+                      Return="asyncNoWait" />
+
         <Feature Id="MainFeature" Title="Virtual Overlay" Level="1">
             <ComponentRef Id="MainExecutable" />
         </Feature>
+
+        <InstallExecuteSequence>
+            <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT Installed" />
+        </InstallExecuteSequence>
 
     </Package>
 </Wix>

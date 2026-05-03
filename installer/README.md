@@ -12,30 +12,37 @@ This directory contains WiX v4 MSI installer definition files.
 
 | File | Description |
 |------|-------------|
-| `Product.wxs` | Main MSI definition with components and features |
-| `UI.wxs` | UI customization and launch-on-exit behavior |
+| `Package.wxs` | Release MSI definition. Build this file for all release installers. |
+| `Product.wxs` | ⚠️ Deprecated and not used for releases. Do not build this file. |
+| `UI.wxs` | ⚠️ Deprecated and not used for releases. Do not build this file. |
 | `License.rtf` | License agreement (create before build) |
 | `banner.bmp` | 493x58 banner image for dialog headers |
 | `dialog.bmp` | 493x312 background image for welcome dialog |
 
 ## Building the MSI
 
-### Option 1: Using WiX CLI (wix.exe)
+Build `Package.wxs` only. It is the only installer definition used for releases.
+
+⚠️ `Product.wxs` and `UI.wxs` are deprecated and not used for releases. Do not build these.
+
+### Recommended: use build.ps1 (from project root)
 
 ```powershell
-# From repository root
-wix build installer/Product.wxs installer/UI.wxs `
-    -d BuildDir=build/Release `
-    -ext WixToolset.UI.wixext `
-    -o build/VirtualOverlay-1.0.0.msi
+.\build.ps1 -SkipSign       # build EXE + MSI, no signing
+.\build.ps1                  # build EXE + MSI + sign both (requires Certum SimplySign)
 ```
 
-### Option 2: Using dotnet
+### Manual (from the installer/ directory)
 
 ```powershell
-# Create a wixproj file first, then:
-dotnet build installer/VirtualOverlay.Installer.wixproj -c Release
+wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 ```
+
+⚠️ The `-ext WixToolset.Util.wixext` flag is required. The build will fail without it.
+
+Expected install location: `%LocalAppData%\VirtualOverlay\`
+
+Autostart is registered during install by writing the current user `Run` key. No manual registration is required.
 
 ## Required Assets (Before Building)
 
@@ -80,7 +87,7 @@ Side panel image for welcome/completion dialogs.
 
 | Purpose | GUID | Notes |
 |---------|------|-------|
-| UpgradeCode | f47ac10b-58cc-4372-a567-0e02b2c3d479 | Never change - identifies product family |
+| UpgradeCode | F8E3B5A1-7C2D-4E9F-B6A8-3D1C5E7F9A2B | Never change - identifies product family |
 | MainExecutable | a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d | Component GUID |
 | ConfigDir | c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f | Component GUID |
 | ApplicationShortcut | b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e | Component GUID |
@@ -90,7 +97,7 @@ Side panel image for welcome/completion dialogs.
 
 When releasing a new version:
 
-1. Update `Version` in Product.wxs
+1. Update `Version` in `Package.wxs`
 2. Keep `UpgradeCode` the same (enables upgrades)
 3. Rebuild MSI
 4. Major upgrades automatically uninstall previous versions

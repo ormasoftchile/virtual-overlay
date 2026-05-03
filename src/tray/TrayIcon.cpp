@@ -99,18 +99,55 @@ void TrayIcon::Shutdown() {
     LOG_INFO("TrayIcon shutdown");
 }
 
+bool TrayIcon::AddIcon() {
+    if (!Shell_NotifyIconW(NIM_ADD, &m_nid)) {
+        DWORD err = GetLastError();
+        LOG_WARN("Shell_NotifyIcon NIM_ADD failed (attempt %d/%d): %lu",
+                 m_addRetryCount + 1, MAX_TRAY_RETRIES, err);
+        if (m_addRetryCount < MAX_TRAY_RETRIES) {
+            SetTimer(m_hParentWnd, TIMER_TRAY_RETRY, TRAY_RETRY_INTERVAL_MS, nullptr);
+        } else {
+            LOG_ERROR("Tray icon failed after %d retries — giving up", MAX_TRAY_RETRIES);
+        }
+        return false;
+    }
+
+    KillTimer(m_hParentWnd, TIMER_TRAY_RETRY);
+    m_addRetryCount = 0;
+
+    if (!Shell_NotifyIconW(NIM_SETVERSION, &m_nid)) {
+        LOG_WARN("Failed to set tray icon version: %lu", GetLastError());
+    }
+
+    m_visible = true;
+    LOG_INFO("Tray icon added successfully");
+    return true;
+}
+
 void TrayIcon::Show() {
     if (!m_initialized || m_visible) {
         return;
     }
 
-    if (Shell_NotifyIconW(NIM_ADD, &m_nid)) {
-        Shell_NotifyIconW(NIM_SETVERSION, &m_nid);
-        m_visible = true;
+    if (AddIcon()) {
         LOG_DEBUG("Tray icon shown");
-    } else {
-        LOG_ERROR("Failed to add tray icon: %lu", GetLastError());
     }
+}
+
+void TrayIcon::Restore() {
+    if (!m_initialized) {
+        return;
+    }
+
+    if (AddIcon()) {
+        LOG_INFO("Tray icon restored after shell restart");
+    }
+}
+
+void TrayIcon::OnRetryTimer() {
+    m_addRetryCount++;
+    LOG_INFO("Retrying tray icon add (attempt %d/%d)", m_addRetryCount, MAX_TRAY_RETRIES);
+    AddIcon();
 }
 
 void TrayIcon::Hide() {

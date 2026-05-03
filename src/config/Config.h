@@ -34,35 +34,13 @@ enum class OverlayMode {
     Watermark      // Always visible, transparent text only
 };
 
-enum class ModifierKey {
-    Ctrl,
-    Alt,
-    Shift,
-    Win
-};
-
 // General settings
 struct GeneralConfig {
     bool startWithWindows = true;
     bool showTrayIcon = true;
     std::wstring settingsHotkey = L"Ctrl+Shift+O";
-    std::wstring overlayToggleHotkey = L"Ctrl+Shift+D";  // Toggle overlay visibility
-    bool forcePollingMode = true;  // Always use polling for desktop detection (more reliable)
-};
-
-// Zoom settings
-struct ZoomConfig {
-    bool enabled = true;
-    ModifierKey modifierKey = ModifierKey::Ctrl;
-    float zoomStep = 0.5f;              // Increased for faster zoom
-    float minZoom = 1.0f;
-    float maxZoom = 10.0f;
-    bool smoothing = true;
-    float smoothingFactor = 0.08f;      // Reduced for snappier response
-    int animationDurationMs = 50;       // Reduced for faster animation
-    bool doubleTapToReset = true;
-    int doubleTapWindowMs = 300;
-    bool touchpadPinch = true;
+    std::wstring overlayToggleHotkey = L"Ctrl+Shift+D";
+    bool forcePollingMode = true;
 };
 
 // Overlay style settings
@@ -96,25 +74,25 @@ struct OverlayAnimationConfig {
 // Overlay settings
 struct OverlayConfig {
     bool enabled = true;
-    OverlayMode mode = OverlayMode::Notification;
-    OverlayPosition position = OverlayPosition::TopCenter;
+    OverlayMode mode = OverlayMode::Watermark;
+    OverlayPosition position = OverlayPosition::TopRight;
     bool showDesktopNumber = true;
     bool showDesktopName = true;
     std::wstring format = L"{number}: {name}";
     bool autoHide = true;
     int autoHideDelayMs = 2000;
     MonitorSelection monitor = MonitorSelection::Cursor;
-    
+
     // Watermark-specific settings
     int watermarkFontSize = 120;
     float watermarkOpacity = 0.25f;
     bool watermarkShadow = false;
-    uint32_t watermarkColor = 0xFFFFFF;  // White by default
-    
+    uint32_t watermarkColor = 0x00FF00;  // Lime by default
+
     // Dodge mode - move overlay when mouse approaches
     bool dodgeOnHover = false;
-    int dodgeProximity = 100;  // pixels - how close mouse must be to trigger dodge
-    
+    int dodgeProximity = 100;
+
     OverlayStyleConfig style;
     OverlayTextConfig text;
     OverlayAnimationConfig animation;
@@ -124,7 +102,6 @@ struct OverlayConfig {
 struct AppConfig {
     std::wstring schema = L"virtual-overlay-config-v1";
     GeneralConfig general;
-    ZoomConfig zoom;
     OverlayConfig overlay;
 };
 
@@ -133,35 +110,24 @@ class Config {
 public:
     static Config& Instance();
 
-    // Load configuration from file
-    // Returns true if loaded successfully, false if defaults were used
     bool Load();
     bool Load(const std::wstring& filePath);
 
-    // Save configuration to file
     bool Save();
     bool Save(const std::wstring& filePath);
 
-    // Reset to defaults
     void Reset();
 
-    // Get the current configuration (read-only)
     const AppConfig& Get() const;
-
-    // Get mutable configuration for editing
     AppConfig& GetMutable();
 
-    // Apply changes and save
     bool Apply();
 
-    // Get default config path
     static std::wstring GetDefaultConfigPath();
 
-    // Validation
     bool Validate() const;
     bool Validate(const AppConfig& config) const;
 
-    // Convert enums to/from strings
     static std::string PositionToString(OverlayPosition pos);
     static OverlayPosition StringToPosition(const std::string& str);
     static std::string MonitorToString(MonitorSelection mon);
@@ -170,8 +136,6 @@ public:
     static BlurType StringToBlur(const std::string& str);
     static std::string ModeToString(OverlayMode mode);
     static OverlayMode StringToMode(const std::string& str);
-    static std::string ModifierToString(ModifierKey key);
-    static ModifierKey StringToModifier(const std::string& str);
 
 private:
     Config();
@@ -179,11 +143,9 @@ private:
     Config(const Config&) = delete;
     Config& operator=(const Config&) = delete;
 
-    // Helper to parse hex color string
     static uint32_t ParseColor(const std::string& hex);
     static std::string ColorToHex(uint32_t color);
 
-    // Clamp values to valid ranges
     void ClampValues(AppConfig& config);
 
     AppConfig m_config;

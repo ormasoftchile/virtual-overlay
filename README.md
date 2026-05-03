@@ -15,9 +15,6 @@ A lightweight Windows utility that displays an overlay showing your current virt
 - **Multi-monitor** - Works across all displays
 - **Keyboard Shortcut** - Toggle visibility with Ctrl+Shift+D
 - **Desktop Names** - Shows custom names from Windows Settings
-- **Zoom Feature** - Ctrl+Scroll to magnify screen content
-- **Touchpad Pinch** - Pinch-to-zoom gesture support
-- **Double-tap Reset** - Double-tap the modifier key to reset zoom
 
 ## Installation
 
@@ -34,7 +31,7 @@ Download `virtual-overlay.exe` and run directly.
 ## Usage
 
 1. Run Virtual Overlay
-2. Right-click the tray icon → **Settings**
+2. Right-click the tray icon  **Settings**
 3. Configure:
    - **Mode**: Watermark (always visible) or Notification (on switch)
    - **Position**: Corner or center of screen
@@ -46,9 +43,6 @@ Download `virtual-overlay.exe` and run directly.
 | Shortcut | Action |
 |----------|--------|
 | Ctrl+Shift+D | Toggle overlay visibility |
-| Ctrl+Scroll | Zoom in/out |
-| Pinch gesture | Zoom in/out (touchpad) |
-| Double-tap Ctrl | Reset zoom to 1x |
 
 ### Configuration File
 
@@ -62,7 +56,7 @@ Settings are stored in:
 ### Requirements
 - Visual Studio 2022 with C++ Desktop Development
 - CMake 3.20+
-- WiX Toolset 5 (for MSI installer)
+- WiX Toolset v4+ (for MSI installer)
 
 ### Build Steps
 
@@ -71,32 +65,31 @@ Settings are stored in:
 git clone https://github.com/ormasoftchile/virtual-overlay.git
 cd virtual-overlay
 
-# Generate project
-cmake -B build -G "Visual Studio 17 2022" -A x64
+# Build everything (EXE + MSI), no signing
+.\build.ps1 -SkipSign
 
-# Build
+# Or manually:
+cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 
-# Build installer (optional)
+# Build installer (from installer/ directory)
+dotnet tool install --global wix
 cd installer
-dotnet tool install --global wix --version 5.0.1
-wix build Package.wxs -o VirtualOverlay.msi
+wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 ```
 
 ### Project Structure
 
 ```
 src/
-├── main.cpp              # Entry point, message loop
-├── App.cpp               # Application controller
-├── config/               # Configuration management
-├── desktop/              # Virtual Desktop detection (COM + registry polling)
-├── overlay/              # D2D overlay rendering
-├── settings/             # Settings UI
-├── tray/                 # System tray icon
-├── input/                # Modifier key polling, dynamic mouse hook
-├── zoom/                 # Magnification API, zoom controller
-└── utils/                # Helpers (logging, monitors, animation)
+ main.cpp              # Entry point, message loop
+ App.cpp               # Application controller
+ config/               # Configuration management
+ desktop/              # Virtual Desktop detection (COM + registry polling)
+ overlay/              # D2D overlay rendering
+ settings/             # Settings UI
+ tray/                 # System tray icon
+ utils/                # Helpers (logging, monitors, animation)
 ```
 
 ## Technical Notes
@@ -110,12 +103,6 @@ HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops
 ```
 
 Name changes are detected every 150ms via polling, so renaming a desktop updates the overlay without needing to switch away and back.
-
-### Zoom Architecture
-The zoom feature uses the Windows Magnification API (`MagSetFullscreenTransform`). To avoid mouse input latency:
-- The Magnification API is only initialized while actively zoomed, and fully uninitialized (`MagUninitialize`) when zoom returns to 1.0x
-- Mouse speed/acceleration settings are saved and restored around each zoom session to compensate for a DWM cursor pipeline issue when running without `uiAccess`
-- No permanent low-level hooks — modifier key state is polled via `GetAsyncKeyState`, and the mouse hook is only installed while the modifier key is held
 
 ### Rendering
 - Uses Direct2D with per-pixel alpha for true transparency

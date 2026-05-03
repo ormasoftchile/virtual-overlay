@@ -174,11 +174,8 @@ bool SettingsWindow::CreateTabControl() {
     tie.pszText = const_cast<LPWSTR>(L"Overlay");
     TabCtrl_InsertItem(m_hTabControl, 1, &tie);
 
-    tie.pszText = const_cast<LPWSTR>(L"Zoom");
-    TabCtrl_InsertItem(m_hTabControl, 2, &tie);
-
     tie.pszText = const_cast<LPWSTR>(L"About");
-    TabCtrl_InsertItem(m_hTabControl, 3, &tie);
+    TabCtrl_InsertItem(m_hTabControl, 2, &tie);
 
     return true;
 }
@@ -201,13 +198,12 @@ bool SettingsWindow::CreatePages() {
     // Create page windows
     m_hPageGeneral = SettingsPages::CreateGeneralPage(m_hwnd, m_hInstance, rcTab);
     m_hPageOverlay = SettingsPages::CreateOverlayPage(m_hwnd, m_hInstance, rcTab);
-    m_hPageZoom = SettingsPages::CreateZoomPage(m_hwnd, m_hInstance, rcTab);
     m_hPageAbout = SettingsPages::CreateAboutPage(m_hwnd, m_hInstance, rcTab);
 
-    LOG_DEBUG("Pages created: General=%p, Overlay=%p, Zoom=%p, About=%p",
-              (void*)m_hPageGeneral, (void*)m_hPageOverlay, (void*)m_hPageZoom, (void*)m_hPageAbout);
+    LOG_DEBUG("Pages created: General=%p, Overlay=%p, About=%p",
+              (void*)m_hPageGeneral, (void*)m_hPageOverlay, (void*)m_hPageAbout);
 
-    return m_hPageGeneral && m_hPageOverlay && m_hPageZoom && m_hPageAbout;
+    return m_hPageGeneral && m_hPageOverlay && m_hPageAbout;
 }
 
 bool SettingsWindow::CreateButtons() {
@@ -337,9 +333,6 @@ void SettingsWindow::ShowPage(SettingsTab tab) {
         case SettingsTab::Overlay:
             hPage = m_hPageOverlay;
             break;
-        case SettingsTab::Zoom:
-            hPage = m_hPageZoom;
-            break;
         case SettingsTab::About:
             hPage = m_hPageAbout;
             break;
@@ -359,7 +352,6 @@ void SettingsWindow::ShowPage(SettingsTab tab) {
 void SettingsWindow::HideAllPages() {
     if (m_hPageGeneral) ShowWindow(m_hPageGeneral, SW_HIDE);
     if (m_hPageOverlay) ShowWindow(m_hPageOverlay, SW_HIDE);
-    if (m_hPageZoom) ShowWindow(m_hPageZoom, SW_HIDE);
     if (m_hPageAbout) ShowWindow(m_hPageAbout, SW_HIDE);
 }
 
@@ -396,14 +388,12 @@ void SettingsWindow::OnOK() {
 void SettingsWindow::LoadSettingsToUI() {
     SettingsPages::LoadGeneralSettings(m_hPageGeneral, m_workingConfig.general);
     SettingsPages::LoadOverlaySettings(m_hPageOverlay, m_workingConfig.overlay);
-    SettingsPages::LoadZoomSettings(m_hPageZoom, m_workingConfig.zoom);
 }
 
 void SettingsWindow::SaveSettingsFromUI() {
     LOG_DEBUG("SaveSettingsFromUI: hPageOverlay=%p", (void*)m_hPageOverlay);
     SettingsPages::SaveGeneralSettings(m_hPageGeneral, m_workingConfig.general);
     SettingsPages::SaveOverlaySettings(m_hPageOverlay, m_workingConfig.overlay);
-    SettingsPages::SaveZoomSettings(m_hPageZoom, m_workingConfig.zoom);
     LOG_DEBUG("SaveSettingsFromUI done: overlay.position=%d", static_cast<int>(m_workingConfig.overlay.position));
 }
 
