@@ -19,7 +19,9 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Setup WiX
-      run: dotnet tool install --global wix && wix extension add WixToolset.Util.wixext
+      run: |
+        dotnet tool install --global wix --version 5.0.1
+        wix extension add WixToolset.Util.wixext
 
     - name: Create build directory
       run: |
