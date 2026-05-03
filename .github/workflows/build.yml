@@ -19,7 +19,7 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Setup WiX
-      run: dotnet tool install --global wix --version 5.0.1
+      run: dotnet tool install --global wix && wix extension add WixToolset.Util.wixext
 
     - name: Create build directory
       run: |
@@ -32,7 +32,7 @@ jobs:
     - name: Build MSI Installer
       working-directory: installer
       run: |
-        wix build Package.wxs -o VirtualOverlay.msi
+        wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 
     - name: Upload MSI Artifact
       uses: actions/upload-artifact@v4
