@@ -12,19 +12,6 @@ namespace Defaults {
     constexpr bool ShowTrayIcon = true;
     inline const char* SettingsHotkey = "Ctrl+Shift+O";
 
-    // Zoom Settings
-    constexpr bool ZoomEnabled = true;
-    inline const char* ZoomModifierKey = "ctrl";
-    constexpr float ZoomStep = 0.5f;           // Increased for faster zoom
-    constexpr float MinZoom = 1.0f;
-    constexpr float MaxZoom = 10.0f;
-    constexpr bool ZoomSmoothing = true;
-    constexpr float SmoothingFactor = 0.08f;   // Reduced for snappier response
-    constexpr int AnimationDurationMs = 50;    // Reduced for faster animation
-    constexpr bool DoubleTapToReset = true;
-    constexpr int DoubleTapWindowMs = 300;
-    constexpr bool TouchpadPinch = true;
-
     // Overlay Settings
     constexpr bool OverlayEnabled = true;
     inline const char* OverlayPosition = "top-center";  // top-left, top-center, top-right, center, bottom-left, bottom-center, bottom-right
@@ -63,7 +50,7 @@ namespace Defaults {
 
     // App info
     inline const char* AppName = "Virtual Overlay";
-    inline const char* AppVersion = "1.0.0";
+    inline const char* AppVersion = "1.0.1";
     inline const wchar_t* ConfigFileName = L"config.json";
     inline const wchar_t* LogDirName = L"logs";
 

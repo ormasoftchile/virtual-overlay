@@ -2,14 +2,11 @@
 // Implements: WinMain, single-instance check, message loop, COM initialization
 
 #include <windows.h>
-#include <windowsx.h>  // For GET_X_LPARAM, GET_Y_LPARAM
 #include <objbase.h>
 
 #include "App.h"
 #include "utils/Logger.h"
 #include "config/Config.h"
-#include "input/InputHandler.h"
-#include "input/GestureHandler.h"
 #include "tray/TrayIcon.h"
 
 // Application name for mutex and window class
@@ -184,9 +181,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_TIMER:
-            if (wParam == VirtualOverlay::TIMER_ZOOM_UPDATE) {
-                VirtualOverlay::App::Instance().OnZoomTimer();
-            } else if (wParam == VirtualOverlay::TIMER_DESKTOP_POLL) {
+            if (wParam == VirtualOverlay::TIMER_DESKTOP_POLL) {
                 VirtualOverlay::App::Instance().OnDesktopPollTimer();
             } else if (wParam == VirtualOverlay::TIMER_TRAY_RETRY) {
                 VirtualOverlay::TrayIcon::Instance().OnRetryTimer();
@@ -219,33 +214,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             VirtualOverlay::App::Instance().OnDpiChanged(hwnd, newDpi, suggested);
             return 0;
         }
-
-        case WM_GESTURE:
-            if (VirtualOverlay::GestureHandler::Instance().ProcessGesture(hwnd, wParam, lParam)) {
-                return 0;
-            }
-            break;
-
-        // Zoom feature messages
-        case VirtualOverlay::WM_USER_ZOOM_IN:
-            VirtualOverlay::App::Instance().OnZoomIn();
-            return 0;
-
-        case VirtualOverlay::WM_USER_ZOOM_OUT:
-            VirtualOverlay::App::Instance().OnZoomOut();
-            return 0;
-
-        case VirtualOverlay::WM_USER_ZOOM_RESET:
-            VirtualOverlay::App::Instance().OnZoomReset();
-            return 0;
-
-        case VirtualOverlay::WM_USER_MODIFIER_DOWN:
-            VirtualOverlay::App::Instance().OnModifierDown();
-            return 0;
-
-        case VirtualOverlay::WM_USER_MODIFIER_UP:
-            VirtualOverlay::App::Instance().OnModifierUp();
-            return 0;
 
         case WM_HOTKEY:
             if (wParam == VirtualOverlay::HOTKEY_OVERLAY_TOGGLE) {

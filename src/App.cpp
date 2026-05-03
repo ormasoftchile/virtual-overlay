@@ -2,10 +2,6 @@
 #include "utils/Logger.h"
 #include "utils/Monitor.h"
 #include "config/Config.h"
-#include "zoom/ZoomController.h"
-#include "zoom/ZoomConfig.h"
-#include "input/InputHandler.h"
-#include "input/GestureHandler.h"
 #include "overlay/OverlayWindow.h"
 #include "overlay/OverlayConfig.h"
 #include "desktop/VirtualDesktop.h"
@@ -15,17 +11,6 @@
 #include <cwctype>
 
 namespace VirtualOverlay {
-
-// Helper to convert config modifier key to virtual key code
-static UINT ModifierKeyToVK(ModifierKey key) {
-    switch (key) {
-        case ModifierKey::Ctrl:  return VK_CONTROL;
-        case ModifierKey::Alt:   return VK_MENU;
-        case ModifierKey::Shift: return VK_SHIFT;
-        case ModifierKey::Win:   return VK_LWIN;
-        default:                 return VK_CONTROL;
-    }
-}
 
 // Helper to parse hotkey string like "Ctrl+Shift+D" into modifiers and virtual key
 static bool ParseHotkeyString(const std::wstring& hotkey, UINT& modifiers, UINT& vk) {
@@ -106,16 +91,7 @@ bool App::Init(HINSTANCE hInstance, HWND hMainWnd) {
         return false;
     }
 
-    // Initialize zoom feature if enabled
     const auto& config = Config::Instance().Get();
-    if (config.zoom.enabled) {
-        if (InitZoom()) {
-            m_zoomEnabled = true;
-        } else {
-            LOG_WARN("Failed to initialize zoom feature");
-            // Continue anyway - zoom is optional
-        }
-    }
 
     // Initialize overlay feature if enabled
     if (config.overlay.enabled) {
@@ -152,11 +128,9 @@ bool App::Init(HINSTANCE hInstance, HWND hMainWnd) {
 
     m_initialized = true;
     m_running = true;
-    m_lastUpdateTime = GetTickCount();
 
     LOG_INFO("Application initialized successfully");
     LOG_INFO("Detected %zu monitor(s)", Monitor::Instance().GetCount());
-    LOG_INFO("Zoom enabled: %s", m_zoomEnabled ? "true" : "false");
     LOG_INFO("Overlay enabled: %s", m_overlayEnabled ? "true" : "false");
 
     return true;
@@ -186,9 +160,7 @@ void App::Shutdown() {
         UnregisterHotKey(m_hMainWnd, HOTKEY_OVERLAY_TOGGLE);
     }
 
-    // Stop zoom update timer
     if (m_hMainWnd) {
-        KillTimer(m_hMainWnd, TIMER_ZOOM_UPDATE);
         KillTimer(m_hMainWnd, TIMER_DESKTOP_POLL);
     }
 
@@ -205,14 +177,6 @@ void App::Shutdown() {
 
     // Shutdown tray icon
     TrayIcon::Instance().Shutdown();
-
-    // Shutdown zoom
-    if (m_zoomEnabled) {
-        InputHandler::Instance().Shutdown();
-        GestureHandler::Instance().Shutdown();
-        ZoomController::Instance().Shutdown();
-        m_zoomEnabled = false;
-    }
 
     // Future cleanup:
     // m_trayIcon.reset();
@@ -240,49 +204,6 @@ bool App::InitMonitors() {
                   primary->dpi);
     }
 
-    return true;
-}
-
-bool App::InitZoom() {
-    const auto& config = Config::Instance().Get();
-
-    // Build ZoomSettings from app config
-    ZoomSettings zoomSettings;
-    zoomSettings.enabled = config.zoom.enabled;
-    zoomSettings.modifierVirtualKey = ModifierKeyToVK(config.zoom.modifierKey);
-    zoomSettings.zoomStep = config.zoom.zoomStep;
-    zoomSettings.minZoom = config.zoom.minZoom;
-    zoomSettings.maxZoom = config.zoom.maxZoom;
-    zoomSettings.smoothing = config.zoom.smoothing;
-    zoomSettings.smoothingFactor = config.zoom.smoothingFactor;
-    zoomSettings.animationDurationMs = config.zoom.animationDurationMs;
-    zoomSettings.doubleTapToReset = config.zoom.doubleTapToReset;
-    zoomSettings.doubleTapWindowMs = config.zoom.doubleTapWindowMs;
-    zoomSettings.touchpadPinch = config.zoom.touchpadPinch;
-
-    // Initialize zoom controller
-    if (!ZoomController::Instance().Init(zoomSettings)) {
-        LOG_ERROR("Failed to initialize ZoomController");
-        return false;
-    }
-
-    // Initialize input handler
-    if (!InputHandler::Instance().Init(m_hMainWnd, zoomSettings.modifierVirtualKey)) {
-        LOG_ERROR("Failed to initialize InputHandler");
-        ZoomController::Instance().Shutdown();
-        return false;
-    }
-
-    // Initialize gesture handler for touchpad pinch (optional)
-    if (zoomSettings.touchpadPinch) {
-        GestureHandler::Instance().Init(m_hMainWnd);
-        // Don't fail if gestures don't work
-    }
-
-    // Start zoom update timer
-    SetTimer(m_hMainWnd, TIMER_ZOOM_UPDATE, TIMER_ZOOM_INTERVAL_MS, nullptr);
-
-    LOG_INFO("Zoom feature initialized");
     return true;
 }
 
@@ -437,23 +358,6 @@ void App::OnSettingsChanged() {
              static_cast<int>(config.overlay.position),
              static_cast<int>(config.overlay.style.blur));
 
-    // Update zoom config if enabled
-    if (m_zoomEnabled) {
-        ZoomSettings zoomSettings;
-        zoomSettings.enabled = config.zoom.enabled;
-        zoomSettings.modifierVirtualKey = ModifierKeyToVK(config.zoom.modifierKey);
-        zoomSettings.zoomStep = config.zoom.zoomStep;
-        zoomSettings.minZoom = config.zoom.minZoom;
-        zoomSettings.maxZoom = config.zoom.maxZoom;
-        zoomSettings.smoothing = config.zoom.smoothing;
-        zoomSettings.smoothingFactor = config.zoom.smoothingFactor;
-        zoomSettings.doubleTapToReset = config.zoom.doubleTapToReset;
-        zoomSettings.doubleTapWindowMs = config.zoom.doubleTapWindowMs;
-        
-        ZoomController::Instance().ApplyConfig(zoomSettings);
-        InputHandler::Instance().SetModifierKey(zoomSettings.modifierVirtualKey);
-    }
-
     // Update overlay settings if enabled
     if (m_overlayEnabled) {
         OverlaySettings overlaySettings;
@@ -504,62 +408,6 @@ void App::OnSettingsChanged() {
             }
         }
     }
-}
-
-void App::OnZoomIn() {
-    if (m_zoomEnabled) {
-        ZoomController::Instance().ZoomIn();
-    }
-}
-
-void App::OnZoomOut() {
-    if (m_zoomEnabled) {
-        ZoomController::Instance().ZoomOut();
-    }
-}
-
-void App::OnZoomReset() {
-    if (m_zoomEnabled) {
-        ZoomController::Instance().ResetZoom();
-    }
-}
-
-void App::OnModifierDown() {
-    if (m_zoomEnabled) {
-        ZoomController::Instance().OnModifierPressed();
-    }
-}
-
-void App::OnModifierUp() {
-    if (m_zoomEnabled) {
-        ZoomController::Instance().OnModifierReleased();
-    }
-}
-
-void App::OnZoomTimer() {
-    if (!m_zoomEnabled) return;
-
-    // Poll modifier key state (replaces keyboard hook)
-    InputHandler::Instance().PollModifierState();
-
-    DWORD now = GetTickCount();
-    float deltaMs = static_cast<float>(now - m_lastUpdateTime);
-    m_lastUpdateTime = now;
-
-    // Clamp delta to reasonable range (avoid huge jumps if app was paused)
-    if (deltaMs > 100.0f) deltaMs = 100.0f;
-    if (deltaMs < 1.0f) deltaMs = 1.0f;
-
-    // Poll cursor position for pan tracking before update so it's
-    // incorporated in the same frame's magnification application
-    if (ZoomController::Instance().IsZoomed()) {
-        POINT pt;
-        if (GetCursorPos(&pt)) {
-            ZoomController::Instance().OnCursorMove(pt.x, pt.y);
-        }
-    }
-
-    ZoomController::Instance().Update(deltaMs);
 }
 
 void App::OnDesktopPollTimer() {
@@ -615,10 +463,10 @@ void App::ShowAbout() {
     MessageBoxW(
         m_hMainWnd,
         L"Virtual Overlay\n"
-        L"Version 1.0.0\n\n"
+        L"Version 1.0.1\n\n"
         L"A Windows utility for virtual desktop overlay\n"
-        L"and macOS-style screen zoom.\n\n"
-        L"© 2026 Virtual Overlay Contributors",
+        L"and desktop watermark display.\n\n"
+        L"\u00A9 2026 Virtual Overlay Contributors",
         L"About Virtual Overlay",
         MB_OK | MB_ICONINFORMATION
     );

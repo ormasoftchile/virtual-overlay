@@ -1,12 +1,8 @@
 #include "SettingsPages.h"
 #include "SettingsWindow.h"
-#include "../config/Defaults.h"
-#include "../utils/Logger.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
-#include <sstream>
-#include <iomanip>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -45,12 +41,6 @@ static LRESULT CALLBACK PageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             } else if (id == IDC_OVL_DODGE_PROXIMITY) {
                 swprintf_s(text, L"%dpx", pos);
                 SetDlgItemTextW(hwnd, IDC_OVL_DODGE_PROXIMITY_LABEL, text);
-            } else if (id == IDC_ZOOM_STEP) {
-                swprintf_s(text, L"%d%%", pos);
-                SetDlgItemTextW(hwnd, IDC_ZOOM_STEP_LABEL, text);
-            } else if (id == IDC_ZOOM_MAX) {
-                swprintf_s(text, L"%dx", pos);
-                SetDlgItemTextW(hwnd, IDC_ZOOM_MAX_LABEL, text);
             }
             return 0;
         }
@@ -469,112 +459,6 @@ void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config) {
 }
 
 // =============================================================================
-// Zoom Page
-// =============================================================================
-
-HWND SettingsPages::CreateZoomPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage) {
-    RegisterPageClass(hInstance);
-
-    HWND hPage = CreateWindowExW(
-        WS_EX_CONTROLPARENT, PAGE_CLASS, nullptr,
-        WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-        rcPage.left, rcPage.top,
-        rcPage.right - rcPage.left,
-        rcPage.bottom - rcPage.top,
-        hParent, nullptr, hInstance, nullptr
-    );
-
-    if (!hPage) return nullptr;
-
-    int y = 15;
-    int x = 20;
-    int labelW = 120;
-    int ctrlW = 150;
-    int ctrlH = 22;
-    int spacing = 28;
-
-    // Enable checkbox
-    CreateCheckbox(hPage, hInstance, IDC_ZOOM_ENABLE, L"Enable zoom", x, y, 150, ctrlH);
-    y += spacing;
-
-    // Modifier key dropdown
-    CreateLabel(hPage, hInstance, 0, L"Modifier key:", x, y + 2, labelW, ctrlH);
-    HWND hMod = CreateComboBox(hPage, hInstance, IDC_ZOOM_MODIFIER, x + labelW, y, ctrlW, 150);
-    SendMessageW(hMod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Ctrl"));
-    SendMessageW(hMod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Alt"));
-    SendMessageW(hMod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Shift"));
-    SendMessageW(hMod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Win"));
-    y += spacing;
-
-    // Zoom step slider
-    CreateLabel(hPage, hInstance, 0, L"Zoom step:", x, y + 2, labelW, ctrlH);
-    CreateSlider(hPage, hInstance, IDC_ZOOM_STEP, x + labelW, y, ctrlW, 25, 10, 100);  // 0.1 to 1.0
-    CreateLabel(hPage, hInstance, IDC_ZOOM_STEP_LABEL, L"0.50", x + labelW + ctrlW + 10, y + 2, 40, ctrlH);
-    y += spacing;
-
-    // Max zoom slider
-    CreateLabel(hPage, hInstance, 0, L"Max zoom:", x, y + 2, labelW, ctrlH);
-    CreateSlider(hPage, hInstance, IDC_ZOOM_MAX, x + labelW, y, ctrlW, 25, 2, 20);  // 2x to 20x
-    CreateLabel(hPage, hInstance, IDC_ZOOM_MAX_LABEL, L"10x", x + labelW + ctrlW + 10, y + 2, 40, ctrlH);
-    y += spacing;
-
-    // Smoothing checkbox
-    CreateCheckbox(hPage, hInstance, IDC_ZOOM_SMOOTHING, L"Smooth zoom animation", x, y, 200, ctrlH);
-    y += spacing;
-
-    // Double-tap to reset checkbox
-    CreateCheckbox(hPage, hInstance, IDC_ZOOM_DOUBLETAP, L"Double-tap modifier to reset", x, y, 200, ctrlH);
-    y += spacing;
-
-    // Touchpad pinch checkbox
-    CreateCheckbox(hPage, hInstance, IDC_ZOOM_PINCH, L"Touchpad pinch-to-zoom", x, y, 200, ctrlH);
-
-    return hPage;
-}
-
-void SettingsPages::LoadZoomSettings(HWND hPage, const ZoomConfig& config) {
-    if (!hPage) return;
-
-    CheckDlgButton(hPage, IDC_ZOOM_ENABLE, config.enabled ? BST_CHECKED : BST_UNCHECKED);
-    SendDlgItemMessageW(hPage, IDC_ZOOM_MODIFIER, CB_SETCURSEL, static_cast<int>(config.modifierKey), 0);
-
-    int step = static_cast<int>(config.zoomStep * 100.0f);
-    SendDlgItemMessageW(hPage, IDC_ZOOM_STEP, TBM_SETPOS, TRUE, step);
-    wchar_t stepText[16];
-    swprintf_s(stepText, L"%d%%", step);
-    SetDlgItemTextW(hPage, IDC_ZOOM_STEP_LABEL, stepText);
-
-    int maxZoom = static_cast<int>(config.maxZoom);
-    SendDlgItemMessageW(hPage, IDC_ZOOM_MAX, TBM_SETPOS, TRUE, maxZoom);
-    wchar_t maxText[16];
-    swprintf_s(maxText, L"%dx", maxZoom);
-    SetDlgItemTextW(hPage, IDC_ZOOM_MAX_LABEL, maxText);
-
-    CheckDlgButton(hPage, IDC_ZOOM_SMOOTHING, config.smoothing ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hPage, IDC_ZOOM_DOUBLETAP, config.doubleTapToReset ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hPage, IDC_ZOOM_PINCH, config.touchpadPinch ? BST_CHECKED : BST_UNCHECKED);
-}
-
-void SettingsPages::SaveZoomSettings(HWND hPage, ZoomConfig& config) {
-    if (!hPage) return;
-
-    config.enabled = IsDlgButtonChecked(hPage, IDC_ZOOM_ENABLE) == BST_CHECKED;
-
-    int mod = static_cast<int>(SendDlgItemMessageW(hPage, IDC_ZOOM_MODIFIER, CB_GETCURSEL, 0, 0));
-    if (mod >= 0) config.modifierKey = static_cast<ModifierKey>(mod);
-
-    int step = static_cast<int>(SendDlgItemMessageW(hPage, IDC_ZOOM_STEP, TBM_GETPOS, 0, 0));
-    config.zoomStep = step / 100.0f;
-
-    int maxZoom = static_cast<int>(SendDlgItemMessageW(hPage, IDC_ZOOM_MAX, TBM_GETPOS, 0, 0));
-    config.maxZoom = static_cast<float>(maxZoom);
-
-    config.smoothing = IsDlgButtonChecked(hPage, IDC_ZOOM_SMOOTHING) == BST_CHECKED;
-    config.doubleTapToReset = IsDlgButtonChecked(hPage, IDC_ZOOM_DOUBLETAP) == BST_CHECKED;
-    config.touchpadPinch = IsDlgButtonChecked(hPage, IDC_ZOOM_PINCH) == BST_CHECKED;
-}
-
-// =============================================================================
 // About Page
 // =============================================================================
 
@@ -603,14 +487,14 @@ HWND SettingsPages::CreateAboutPage(HWND hParent, HINSTANCE hInstance, const REC
 
     // Version
     std::wstring version = L"Version: ";
-    version += L"1.0.0";
+    version += L"1.0.1";
     CreateLabel(hPage, hInstance, IDC_ABOUT_VERSION, version.c_str(), x, y, 200, ctrlH);
     y += spacing;
 
     // Description
     CreateLabel(hPage, hInstance, 0, L"A Windows utility for virtual desktop overlay", x, y, 350, ctrlH);
     y += spacing;
-    CreateLabel(hPage, hInstance, 0, L"and macOS-style screen zoom.", x, y, 350, ctrlH);
+    CreateLabel(hPage, hInstance, 0, L"and desktop watermark display.", x, y, 350, ctrlH);
     y += spacing * 2;
 
     // GitHub link
@@ -620,7 +504,7 @@ HWND SettingsPages::CreateAboutPage(HWND hParent, HINSTANCE hInstance, const REC
     y += spacing * 2;
 
     // Copyright
-    CreateLabel(hPage, hInstance, 0, L"© 2026 Virtual Overlay Contributors", x, y, 300, ctrlH);
+    CreateLabel(hPage, hInstance, 0, L"\u00A9 2026 Virtual Overlay Contributors", x, y, 300, ctrlH);
 
     return hPage;
 }

@@ -110,22 +110,6 @@ bool Config::Load(const std::wstring& filePath) {
             if (g.contains("forcePollingMode")) m_config.general.forcePollingMode = g["forcePollingMode"].get<bool>();
         }
         
-        // Parse zoom settings
-        if (j.contains("zoom")) {
-            auto& z = j["zoom"];
-            if (z.contains("enabled")) m_config.zoom.enabled = z["enabled"].get<bool>();
-            if (z.contains("modifierKey")) m_config.zoom.modifierKey = StringToModifier(z["modifierKey"].get<std::string>());
-            if (z.contains("zoomStep")) m_config.zoom.zoomStep = z["zoomStep"].get<float>();
-            if (z.contains("minZoom")) m_config.zoom.minZoom = z["minZoom"].get<float>();
-            if (z.contains("maxZoom")) m_config.zoom.maxZoom = z["maxZoom"].get<float>();
-            if (z.contains("smoothing")) m_config.zoom.smoothing = z["smoothing"].get<bool>();
-            if (z.contains("smoothingFactor")) m_config.zoom.smoothingFactor = z["smoothingFactor"].get<float>();
-            if (z.contains("animationDurationMs")) m_config.zoom.animationDurationMs = z["animationDurationMs"].get<int>();
-            if (z.contains("doubleTapToReset")) m_config.zoom.doubleTapToReset = z["doubleTapToReset"].get<bool>();
-            if (z.contains("doubleTapWindowMs")) m_config.zoom.doubleTapWindowMs = z["doubleTapWindowMs"].get<int>();
-            if (z.contains("touchpadPinch")) m_config.zoom.touchpadPinch = z["touchpadPinch"].get<bool>();
-        }
-        
         // Parse overlay settings
         if (j.contains("overlay")) {
             auto& o = j["overlay"];
@@ -230,19 +214,6 @@ bool Config::Save(const std::wstring& filePath) {
         j["general"]["overlayToggleHotkey"] = WideToUtf8(m_config.general.overlayToggleHotkey);
         j["general"]["forcePollingMode"] = m_config.general.forcePollingMode;
         
-        // Zoom
-        j["zoom"]["enabled"] = m_config.zoom.enabled;
-        j["zoom"]["modifierKey"] = ModifierToString(m_config.zoom.modifierKey);
-        j["zoom"]["zoomStep"] = m_config.zoom.zoomStep;
-        j["zoom"]["minZoom"] = m_config.zoom.minZoom;
-        j["zoom"]["maxZoom"] = m_config.zoom.maxZoom;
-        j["zoom"]["smoothing"] = m_config.zoom.smoothing;
-        j["zoom"]["smoothingFactor"] = m_config.zoom.smoothingFactor;
-        j["zoom"]["animationDurationMs"] = m_config.zoom.animationDurationMs;
-        j["zoom"]["doubleTapToReset"] = m_config.zoom.doubleTapToReset;
-        j["zoom"]["doubleTapWindowMs"] = m_config.zoom.doubleTapWindowMs;
-        j["zoom"]["touchpadPinch"] = m_config.zoom.touchpadPinch;
-        
         // Overlay
         j["overlay"]["enabled"] = m_config.overlay.enabled;
         j["overlay"]["mode"] = ModeToString(m_config.overlay.mode);
@@ -338,13 +309,6 @@ bool Config::Validate() const {
 }
 
 bool Config::Validate(const AppConfig& config) const {
-    // Zoom validation
-    if (config.zoom.zoomStep < 0.1f || config.zoom.zoomStep > 1.0f) return false;
-    if (config.zoom.maxZoom < 2.0f || config.zoom.maxZoom > 20.0f) return false;
-    if (config.zoom.smoothingFactor < 0.05f || config.zoom.smoothingFactor > 0.5f) return false;
-    if (config.zoom.animationDurationMs < 0 || config.zoom.animationDurationMs > 500) return false;
-    if (config.zoom.doubleTapWindowMs < 100 || config.zoom.doubleTapWindowMs > 1000) return false;
-    
     // Overlay validation
     if (config.overlay.autoHideDelayMs < 500 || config.overlay.autoHideDelayMs > 10000) return false;
     if (config.overlay.style.tintOpacity < 0.0f || config.overlay.style.tintOpacity > 1.0f) return false;
@@ -357,14 +321,6 @@ bool Config::Validate(const AppConfig& config) const {
 }
 
 void Config::ClampValues(AppConfig& config) {
-    // Clamp zoom values
-    config.zoom.zoomStep = std::clamp(config.zoom.zoomStep, 0.1f, 1.0f);
-    config.zoom.minZoom = 1.0f;  // Fixed
-    config.zoom.maxZoom = std::clamp(config.zoom.maxZoom, 2.0f, 20.0f);
-    config.zoom.smoothingFactor = std::clamp(config.zoom.smoothingFactor, 0.05f, 0.5f);
-    config.zoom.animationDurationMs = std::clamp(config.zoom.animationDurationMs, 0, 500);
-    config.zoom.doubleTapWindowMs = std::clamp(config.zoom.doubleTapWindowMs, 100, 1000);
-    
     // Clamp overlay values
     config.overlay.autoHideDelayMs = std::clamp(config.overlay.autoHideDelayMs, 500, 10000);
     config.overlay.style.tintOpacity = std::clamp(config.overlay.style.tintOpacity, 0.0f, 1.0f);
@@ -447,24 +403,6 @@ OverlayMode Config::StringToMode(const std::string& str) {
     if (str == "notification") return OverlayMode::Notification;
     if (str == "watermark") return OverlayMode::Watermark;
     return OverlayMode::Notification;  // Default
-}
-
-std::string Config::ModifierToString(ModifierKey key) {
-    switch (key) {
-        case ModifierKey::Ctrl: return "ctrl";
-        case ModifierKey::Alt: return "alt";
-        case ModifierKey::Shift: return "shift";
-        case ModifierKey::Win: return "win";
-        default: return "ctrl";
-    }
-}
-
-ModifierKey Config::StringToModifier(const std::string& str) {
-    if (str == "ctrl") return ModifierKey::Ctrl;
-    if (str == "alt") return ModifierKey::Alt;
-    if (str == "shift") return ModifierKey::Shift;
-    if (str == "win") return ModifierKey::Win;
-    return ModifierKey::Ctrl;  // Default
 }
 
 uint32_t Config::ParseColor(const std::string& hex) {
