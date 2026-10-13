@@ -21,9 +21,10 @@ A lightweight Windows utility that displays an overlay showing your current virt
 ### MSI Installer (Recommended)
 Download the latest `VirtualOverlay.msi` from [Releases](https://github.com/ormasoftchile/virtual-overlay/releases).
 
-- Per-user installation (no admin required)
+- Per-machine installation to `%ProgramFiles%\VirtualOverlay` (admin prompt on install)
 - Adds to Windows startup automatically
-- Installs to `%LocalAppData%\VirtualOverlay`
+- Signed releases are marked UIAccess so the teleprompter flip also covers the Start menu and Task View (Windows only allows this for signed apps in Program Files)
+- Upgrading from 1.0.1 or earlier (per-user install): uninstall the old version first
 
 ### Portable
 Download `virtual-overlay.exe` and run directly.

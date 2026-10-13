@@ -34,6 +34,13 @@ constexpr int IDC_OVL_DODGE = 321;
 constexpr int IDC_OVL_DODGE_PROXIMITY = 322;
 constexpr int IDC_OVL_DODGE_PROXIMITY_LABEL = 323;
 
+constexpr int IDC_FLIP_ENABLE = 400;
+constexpr int IDC_FLIP_HOTKEY = 401;
+constexpr int IDC_FLIP_INVERT_MOUSE = 402;
+constexpr int IDC_FLIP_CURSOR_MODE = 403;
+constexpr int IDC_FLIP_MONITOR_BASE = 410;
+constexpr int IDC_FLIP_MONITOR_MAX = 32;
+
 constexpr int IDC_ABOUT_VERSION = 500;
 constexpr int IDC_ABOUT_GITHUB = 501;
 constexpr int IDC_ABOUT_AUTHOR = 502;
@@ -42,13 +49,16 @@ class SettingsPages {
 public:
     static HWND CreateGeneralPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
     static HWND CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
+    static HWND CreateFlipPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
     static HWND CreateAboutPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
 
     static void LoadGeneralSettings(HWND hPage, const GeneralConfig& config);
     static void LoadOverlaySettings(HWND hPage, const OverlayConfig& config);
+    static void LoadFlipSettings(HWND hPage, const FlipConfig& config);
 
     static void SaveGeneralSettings(HWND hPage, GeneralConfig& config);
     static void SaveOverlaySettings(HWND hPage, OverlayConfig& config);
+    static void SaveFlipSettings(HWND hPage, FlipConfig& config);
 
 private:
     static LRESULT CALLBACK GeneralPageProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
