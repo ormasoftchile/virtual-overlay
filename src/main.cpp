@@ -191,6 +191,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 VirtualOverlay::TrayIcon::Instance().OnRetryTimer();
             } else if (wParam == VirtualOverlay::TIMER_FLIP_CURSOR) {
                 VirtualOverlay::FlipManager::Instance().OnCursorTimer();
+            } else if (wParam == VirtualOverlay::TIMER_FLIP_DISPLAY_SETTLE) {
+                VirtualOverlay::FlipManager::Instance().OnDisplaySettleTimer();
             }
             return 0;
 
@@ -211,6 +213,12 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         case WM_DISPLAYCHANGE:
             // Monitor configuration changed
             VirtualOverlay::App::Instance().OnDisplayChange();
+            return 0;
+
+        case WM_SETTINGCHANGE:
+            if (wParam == SPI_SETWORKAREA) {
+                VirtualOverlay::App::Instance().OnDisplayChange();
+            }
             return 0;
 
         case WM_DPICHANGED: {

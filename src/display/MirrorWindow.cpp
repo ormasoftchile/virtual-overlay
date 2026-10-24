@@ -38,6 +38,7 @@ constexpr wchar_t MirrorWindow::WINDOW_CLASS[];
 
 struct MirrorWindow::Impl {
     bool useWgc = false;
+    std::atomic<bool> captureLost{ false };
 
     // WGC / D3D11 / D2D resources
     ID3D11Device* d3dDevice = nullptr;
@@ -52,6 +53,7 @@ struct MirrorWindow::Impl {
     winrt_cap::Direct3D11CaptureFramePool framePool{ nullptr };
     winrt_cap::GraphicsCaptureSession captureSession{ nullptr };
     winrt::event_token frameArrivedToken{};
+    winrt::event_token itemClosedToken{};
 
     std::mutex renderMutex;
     std::atomic<bool> running{ false };
@@ -152,7 +154,11 @@ struct MirrorWindow::Impl {
         d2dContext->BeginDraw();
         d2dContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
         d2dContext->SetTransform(flipMatrix);
-        d2dContext->DrawBitmap(contentBitmap);
+        D2D1_RECT_F destRect = D2D1::RectF(
+            0.0f, 0.0f,
+            static_cast<float>(widthPx),
+            static_cast<float>(heightPx));
+        d2dContext->DrawBitmap(contentBitmap, destRect);
 
         if (drawCursor) {
             CURSORINFO ci = { sizeof(ci) };
@@ -172,8 +178,20 @@ struct MirrorWindow::Impl {
             }
         }
 
-        if (SUCCEEDED(d2dContext->EndDraw())) {
-            swapChain->Present(1, 0);
+        HRESULT endHr = d2dContext->EndDraw();
+        if (SUCCEEDED(endHr)) {
+            HRESULT presentHr = swapChain->Present(1, 0);
+            if (FAILED(presentHr) && presentHr != DXGI_STATUS_OCCLUDED) {
+                LOG_WARN("MirrorWindow: Present failed (0x%08lX), marking capture lost",
+                         static_cast<unsigned long>(presentHr));
+                captureLost = true;
+            }
+        } else if (endHr == D2DERR_RECREATE_TARGET ||
+                   endHr == DXGI_ERROR_DEVICE_REMOVED ||
+                   endHr == DXGI_ERROR_DEVICE_RESET) {
+            LOG_WARN("MirrorWindow: EndDraw failed (0x%08lX), marking capture lost",
+                     static_cast<unsigned long>(endHr));
+            captureLost = true;
         }
     }
 
@@ -242,21 +260,33 @@ struct MirrorWindow::Impl {
         running = false;
         StopRenderThread();
 
+        // Move WinRT objects to locals before closing so state is immediately cleared
+        // even if COM STA pumps messages during Close().
+        auto item = std::move(captureItem);
+        auto pool = std::move(framePool);
+        auto session = std::move(captureSession);
+        auto closedTok = itemClosedToken;
+        auto arrivedTok = frameArrivedToken;
+        itemClosedToken = {};
+        frameArrivedToken = {};
+
         // Tear down capture WITHOUT holding renderMutex: closing waits for any
         // in-flight FrameArrived callback, which itself takes renderMutex.
-        if (framePool && frameArrivedToken.value != 0) {
-            try { framePool.FrameArrived(frameArrivedToken); } catch (...) {}
-            frameArrivedToken = {};
+        if (pool && arrivedTok.value != 0) {
+            try { pool.FrameArrived(arrivedTok); } catch (...) {}
         }
-        if (captureSession) {
-            try { captureSession.Close(); } catch (...) {}
-            captureSession = nullptr;
+        if (item && closedTok.value != 0) {
+            try { item.Closed(closedTok); } catch (...) {}
         }
-        if (framePool) {
-            try { framePool.Close(); } catch (...) {}
-            framePool = nullptr;
+        if (session) {
+            try { session.Close(); } catch (...) {}
+            session = nullptr;
         }
-        captureItem = nullptr;
+        if (pool) {
+            try { pool.Close(); } catch (...) {}
+            pool = nullptr;
+        }
+        item = nullptr;
 
         std::lock_guard<std::mutex> lock(renderMutex);
 
@@ -280,32 +310,40 @@ struct MirrorWindow::Impl {
             DestroyWindow(magHwnd);
             magHwnd = nullptr;
         }
+
         useWgc = false;
     }
 };
 
-MirrorWindow::MirrorWindow()
-    : m_impl(std::make_unique<Impl>()) {
-}
+MirrorWindow::MirrorWindow() : m_impl(std::make_unique<Impl>()) {}
 
 MirrorWindow::~MirrorWindow() {
     Destroy();
 }
 
+bool MirrorWindow::IsCaptureLost() const {
+    return m_impl && m_impl->captureLost.load();
+}
+
 void MirrorWindow::EnsureClassRegistered(HINSTANCE hInstance) {
+    static bool registered = false;
+    if (registered) {
+        return;
+    }
+
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = 0;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     wc.lpszClassName = WINDOW_CLASS;
 
-    if (!RegisterClassExW(&wc)) {
-        DWORD error = GetLastError();
-        if (error != ERROR_CLASS_ALREADY_EXISTS) {
-            LOG_WARN("MirrorWindow: failed to register window class: %lu", error);
-        }
+    if (RegisterClassExW(&wc) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS) {
+        registered = true;
+    } else {
+        LOG_ERROR("MirrorWindow: RegisterClassExW failed: %lu", GetLastError());
     }
 }
 
@@ -313,6 +351,12 @@ bool MirrorWindow::Create(HINSTANCE hInstance, const std::wstring& deviceName, c
     if (m_hwnd) {
         Destroy();
     }
+
+    if (!m_impl) {
+        m_impl = std::make_unique<Impl>();
+    }
+
+    EnsureClassRegistered(hInstance);
 
     m_hInstance = hInstance;
     m_deviceName = deviceName;
@@ -322,7 +366,7 @@ bool MirrorWindow::Create(HINSTANCE hInstance, const std::wstring& deviceName, c
     const int width = bounds.right - bounds.left;
     const int height = bounds.bottom - bounds.top;
     if (width <= 0 || height <= 0) {
-        LOG_WARN("MirrorWindow: invalid bounds for %ws", deviceName.c_str());
+        LOG_WARN("MirrorWindow: invalid monitor bounds for %ws", deviceName.c_str());
         return false;
     }
 
@@ -331,14 +375,11 @@ bool MirrorWindow::Create(HINSTANCE hInstance, const std::wstring& deviceName, c
     m_impl->widthPx = static_cast<UINT>(width);
     m_impl->heightPx = static_cast<UINT>(height);
     m_impl->drawCursor = m_magnifiedCursor;
+    m_impl->captureLost = false;
 
-    EnsureClassRegistered(hInstance);
-
-    // Click-through, topmost, non-activating tool window.
-    // WS_EX_LAYERED is required: WS_EX_TRANSPARENT / HTTRANSPARENT alone only
-    // pass input to windows of this same thread, so other applications' windows
-    // would never receive clicks, hover or drags. LAYERED + TRANSPARENT makes
-    // the system hit-test skip this window entirely.
+    // Topmost, non-activating, click-through, tool window so it covers the whole
+    // monitor cleanly, never steals focus, and forwards all mouse/touch input
+    // straight through to the real desktop beneath.
     const DWORD exStyle = WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW |
                           WS_EX_TRANSPARENT | WS_EX_LAYERED;
     const DWORD style = WS_POPUP | WS_CLIPCHILDREN;
@@ -431,11 +472,17 @@ bool MirrorWindow::Create(HINSTANCE hInstance, const std::wstring& deviceName, c
                         m_impl->flipMatrix = D2D1::Matrix3x2F::Scale(-1.0f, 1.0f, D2D1::Point2F(width / 2.0f, 0.0f));
                         m_impl->running = true;
 
+                        Impl* implPtr = m_impl.get();
+                        m_impl->itemClosedToken = m_impl->captureItem.Closed(
+                            [implPtr](winrt_cap::GraphicsCaptureItem const&, winrt::Windows::Foundation::IInspectable const&) {
+                                implPtr->captureLost = true;
+                            });
+
                         m_impl->frameArrivedToken = m_impl->framePool.FrameArrived(
-                            [this](winrt_cap::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&) {
+                            [implPtr](winrt_cap::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&) {
                                 {
-                                    std::lock_guard<std::mutex> lock(m_impl->renderMutex);
-                                    if (!m_impl->running || !m_impl->d2dContext) return;
+                                    std::lock_guard<std::mutex> lock(implPtr->renderMutex);
+                                    if (!implPtr->running || !implPtr->d2dContext) return;
 
                                     auto frame = sender.TryGetNextFrame();
                                     if (!frame) return;
@@ -445,30 +492,34 @@ bool MirrorWindow::Create(HINSTANCE hInstance, const std::wstring& deviceName, c
                                     IDXGISurface* capSurface = nullptr;
                                     if (SUCCEEDED(surfaceInterop->GetInterface(__uuidof(IDXGISurface), (void**)&capSurface)) && capSurface) {
                                         ID2D1Bitmap1* capBitmap = nullptr;
-                                        if (SUCCEEDED(m_impl->d2dContext->CreateBitmapFromDxgiSurface(capSurface, nullptr, &capBitmap)) && capBitmap) {
+                                        if (SUCCEEDED(implPtr->d2dContext->CreateBitmapFromDxgiSurface(capSurface, nullptr, &capBitmap)) && capBitmap) {
                                             const D2D1_SIZE_U sz = capBitmap->GetPixelSize();
-                                            if (!m_impl->contentBitmap ||
-                                                m_impl->contentSize.width != sz.width ||
-                                                m_impl->contentSize.height != sz.height) {
-                                                if (m_impl->contentBitmap) { m_impl->contentBitmap->Release(); m_impl->contentBitmap = nullptr; }
+                                            if (sz.width != implPtr->widthPx || sz.height != implPtr->heightPx) {
+                                                // Captured surface resolution no longer matches our window size (display mode changed)
+                                                implPtr->captureLost = true;
+                                            }
+                                            if (!implPtr->contentBitmap ||
+                                                implPtr->contentSize.width != sz.width ||
+                                                implPtr->contentSize.height != sz.height) {
+                                                if (implPtr->contentBitmap) { implPtr->contentBitmap->Release(); implPtr->contentBitmap = nullptr; }
                                                 D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
                                                     D2D1_BITMAP_OPTIONS_NONE,
                                                     D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-                                                if (SUCCEEDED(m_impl->d2dContext->CreateBitmap(sz, nullptr, 0, props, &m_impl->contentBitmap))) {
-                                                    m_impl->contentSize = sz;
+                                                if (SUCCEEDED(implPtr->d2dContext->CreateBitmap(sz, nullptr, 0, props, &implPtr->contentBitmap))) {
+                                                    implPtr->contentSize = sz;
                                                 }
                                             }
-                                            if (m_impl->contentBitmap) {
+                                            if (implPtr->contentBitmap) {
                                                 D2D1_POINT_2U dst = { 0, 0 };
                                                 D2D1_RECT_U src = { 0, 0, sz.width, sz.height };
-                                                m_impl->contentBitmap->CopyFromBitmap(&dst, capBitmap, &src);
+                                                implPtr->contentBitmap->CopyFromBitmap(&dst, capBitmap, &src);
                                             }
                                             capBitmap->Release();
                                         }
                                         capSurface->Release();
                                     }
                                 }
-                                m_impl->SignalFrame();
+                                implPtr->SignalFrame();
                             });
 
                         m_impl->captureSession.StartCapture();
@@ -541,7 +592,10 @@ void MirrorWindow::UpdateBounds(const RECT& bounds, HMONITOR hMonitor) {
     if (!m_hwnd) {
         return;
     }
-    if (EqualRect(&m_bounds, &bounds) && m_hMonitor == hMonitor) {
+
+    RECT actualRect = {};
+    const bool windowRectMatches = GetWindowRect(m_hwnd, &actualRect) && EqualRect(&actualRect, &bounds);
+    if (EqualRect(&m_bounds, &bounds) && m_hMonitor == hMonitor && windowRectMatches && !IsCaptureLost()) {
         return;
     }
 
@@ -581,50 +635,54 @@ void MirrorWindow::RaiseToTop() {
 }
 
 void MirrorWindow::Destroy() {
-    if (m_impl) {
-        m_impl->Cleanup(m_hwnd);
-    }
-    if (m_hwnd) {
-        DestroyWindow(m_hwnd);
-        m_hwnd = nullptr;
-    }
-    m_deviceName.clear();
+    HWND hwnd = m_hwnd;
+    m_hwnd = nullptr;
     m_bounds = {};
     m_hMonitor = nullptr;
+
+    if (hwnd) {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+
+    auto impl = std::move(m_impl);
+    if (impl) {
+        impl->Cleanup(hwnd);
+    }
+
+    if (hwnd) {
+        DestroyWindow(hwnd);
+    }
 }
 
 LRESULT CALLBACK MirrorWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-        case WM_CREATE: {
-            auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                              reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
-            return 0;
-        }
+    MirrorWindow* self = nullptr;
+    if (msg == WM_NCCREATE) {
+        auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        self = static_cast<MirrorWindow*>(cs->lpCreateParams);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    } else {
+        self = reinterpret_cast<MirrorWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    }
 
-        case WM_TIMER: {
-            if (wParam == Impl::TIMER_REFRESH) {
-                auto* pThis = reinterpret_cast<MirrorWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-                if (pThis && pThis->m_impl && pThis->m_impl->magHwnd) {
-                    InvalidateRect(pThis->m_impl->magHwnd, nullptr, FALSE);
-                }
-                return 0;
+    switch (msg) {
+        case WM_TIMER:
+            if (wParam == Impl::TIMER_REFRESH && self && self->m_impl && self->m_impl->magHwnd) {
+                MagSetWindowSource(self->m_impl->magHwnd, self->m_bounds);
             }
-            break;
-        }
+            return 0;
+
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+
+        case WM_NCHITTEST:
+            return HTTRANSPARENT;
+
+        case WM_DPICHANGED:
+            // Ignore OS DPI resize suggestions; FlipManager manages exact pixel bounds per monitor.
+            return 0;
 
         case WM_ERASEBKGND:
             return 1;
-
-        case WM_NCHITTEST:
-            // Full click-through pass to underlying application windows
-            return HTTRANSPARENT;
-
-        case WM_DESTROY:
-            return 0;
-
-        default:
-            break;
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);

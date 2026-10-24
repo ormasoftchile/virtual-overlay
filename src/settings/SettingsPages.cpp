@@ -548,7 +548,8 @@ void SettingsPages::LoadFlipSettings(HWND hPage, const FlipConfig& config) {
 
     const auto& monitors = Monitor::Instance().GetMonitors();
     for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
-        bool isFlipped = std::find(config.monitors.begin(), config.monitors.end(), monitors[i].name) != config.monitors.end();
+        bool isFlipped = std::any_of(config.monitors.begin(), config.monitors.end(),
+            [&](const std::wstring& id) { return monitors[i].MatchesId(id); });
         CheckDlgButton(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i),
                        isFlipped ? BST_CHECKED : BST_UNCHECKED);
     }
@@ -570,14 +571,28 @@ void SettingsPages::SaveFlipSettings(HWND hPage, FlipConfig& config) {
     if (curSel == 0) config.cursorMode = FlipCursorMode::Magnified;
     else if (curSel == 1) config.cursorMode = FlipCursorMode::None;
 
-    config.monitors.clear();
     const auto& monitors = Monitor::Instance().GetMonitors();
-    for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
-        if (IsDlgButtonChecked(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i)) == BST_CHECKED) {
-            config.monitors.push_back(monitors[i].name);
+    std::vector<std::wstring> updatedMonitors;
+
+    // Preserve any configured monitors that are currently disconnected so saving Settings
+    // while a display is switched away doesn't wipe its configuration.
+    for (const auto& existingId : config.monitors) {
+        bool connectedNow = std::any_of(monitors.begin(), monitors.end(),
+            [&](const MonitorInfo& m) { return m.MatchesId(existingId); });
+        if (!connectedNow) {
+            updatedMonitors.push_back(existingId);
         }
     }
-    if (!config.monitors.empty()) {
+
+    bool anyCheckedNow = false;
+    for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
+        if (IsDlgButtonChecked(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i)) == BST_CHECKED) {
+            updatedMonitors.push_back(monitors[i].GetId());
+            anyCheckedNow = true;
+        }
+    }
+    config.monitors = std::move(updatedMonitors);
+    if (anyCheckedNow) {
         config.enabled = true;
     }
 }

@@ -4,6 +4,7 @@
 #include "../utils/Logger.h"
 #include "../utils/Monitor.h"
 #include "../desktop/VirtualDesktop.h"
+#include "../display/FlipManager.h"
 #include <algorithm>
 #include <regex>
 
@@ -191,7 +192,10 @@ void OverlayWindow::Hide() {
         KillTimer(m_hwnd, TIMER_OVERLAY_DODGE);
         ShowWindow(m_hwnd, SW_HIDE);
         m_state.state = OverlayState::Hidden;
-        m_isDodging = false;
+        if (m_isDodging) {
+            m_settings.position = m_originalPosition;
+            m_isDodging = false;
+        }
         m_dodgeMonitorRect = {};
         LOG_DEBUG("Watermark hidden immediately");
         return;
@@ -202,18 +206,68 @@ void OverlayWindow::Hide() {
 }
 
 void OverlayWindow::OnDisplayChanged() {
-    if (!m_initialized || !IsVisible()) {
+    if (!m_initialized || !IsVisible() || m_updatingPosition) {
         return;
     }
 
     LOG_DEBUG("OnDisplayChanged: repositioning overlay");
-    
+
+    if (m_isDodging) {
+        m_settings.position = m_originalPosition;
+        m_isDodging = false;
+    }
+    m_dodgeMonitorRect = {};
+
     // Update position for new display configuration
     UpdateWindowPosition();
-    
+
     // Force redraw
-    InvalidateRect(m_hwnd, nullptr, TRUE);
-    UpdateWindow(m_hwnd);
+    if (m_settings.mode == OverlayMode::Watermark) {
+        RenderWatermark();
+    } else {
+        InvalidateRect(m_hwnd, nullptr, TRUE);
+        UpdateWindow(m_hwnd);
+    }
+}
+
+void OverlayWindow::CheckPosition() {
+    if (!m_initialized || !m_hwnd || !IsVisible() || m_updatingPosition) {
+        return;
+    }
+
+    // If dodging, verify the dodge monitor rect is still valid and unchanged
+    if (m_isDodging) {
+        HMONITOR hMon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        if (!hMon || !GetMonitorInfoW(hMon, &mi) || !EqualRect(&mi.rcWork, &m_dodgeMonitorRect)) {
+            m_settings.position = m_originalPosition;
+            m_isDodging = false;
+            m_dodgeMonitorRect = {};
+        } else {
+            return;
+        }
+    }
+
+    int expectedX = 0, expectedY = 0;
+    CalculateWindowPosition(expectedX, expectedY, m_windowWidth, m_windowHeight);
+
+    RECT rcWindow = {};
+    if (GetWindowRect(m_hwnd, &rcWindow)) {
+        if (rcWindow.left != expectedX || rcWindow.top != expectedY ||
+            (rcWindow.right - rcWindow.left) != m_windowWidth ||
+            (rcWindow.bottom - rcWindow.top) != m_windowHeight) {
+            LOG_INFO("OverlayWindow: correcting position from (%ld,%ld) to (%d,%d)",
+                     rcWindow.left, rcWindow.top, expectedX, expectedY);
+            UpdateWindowPosition();
+            if (m_settings.mode == OverlayMode::Watermark) {
+                RenderWatermark();
+            } else {
+                InvalidateRect(m_hwnd, nullptr, TRUE);
+                UpdateWindow(m_hwnd);
+            }
+        }
+    }
 }
 
 void OverlayWindow::ApplySettings(const OverlaySettings& settings) {
@@ -221,6 +275,8 @@ void OverlayWindow::ApplySettings(const OverlaySettings& settings) {
              static_cast<int>(settings.mode), static_cast<int>(settings.position), 
              static_cast<int>(settings.monitor), settings.enabled ? 1 : 0);
     
+    m_isDodging = false;
+    m_dodgeMonitorRect = {};
     m_settings = settings;
 
     // Reset resources that depend on settings (font size, opacity)
@@ -296,21 +352,15 @@ LRESULT OverlayWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             return 0;
 
         case WM_SIZE:
-            DiscardRenderResources();
-            CreateRenderResources();
+            if (!m_updatingPosition) {
+                DiscardRenderResources();
+                CreateRenderResources();
+            }
             return 0;
 
         case WM_DISPLAYCHANGE:
         case WM_DPICHANGED:
-            LOG_DEBUG("Display/DPI changed, repositioning watermark");
-            DiscardRenderResources();
-            CreateRenderResources();
-            if (IsVisible()) {
-                UpdateWindowPosition();
-                // Re-render 
-                InvalidateRect(m_hwnd, nullptr, TRUE);
-                UpdateWindow(m_hwnd);
-            }
+            // Display/DPI changes are handled centrally by App::OnDisplayChange and CheckPosition.
             return 0;
 
         default:
@@ -814,34 +864,58 @@ void OverlayWindow::OnDodgeTimer() {
 }
 
 void OverlayWindow::CalculateWindowPosition(int& x, int& y, int width, int height) {
-    LOG_DEBUG("CalculateWindowPosition: m_settings.position=%d", static_cast<int>(m_settings.position));
-    
-    // Get target monitor
-    RECT monitorRect;
+    // Get target monitor workArea directly from live Win32 monitor APIs
+    RECT monitorRect = {};
     
     // During dodge, use the stored monitor rect to prevent jumping monitors
     if (m_isDodging && (m_dodgeMonitorRect.right - m_dodgeMonitorRect.left) > 0) {
         monitorRect = m_dodgeMonitorRect;
     } else {
-        const MonitorInfo* targetMonitor = nullptr;
+        HMONITOR hTargetMon = nullptr;
 
         switch (m_settings.monitor) {
-            case MonitorSelection::Cursor:
-                targetMonitor = Monitor::Instance().GetAtCursor();
+            case MonitorSelection::Cursor: {
+                POINT pt = {};
+                GetCursorPos(&pt);
+                hTargetMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+                // In watermark mode, if the cursor is over a flipped teleprompter monitor
+                // (or a configured flip monitor that is not primary), keep the watermark on
+                // the primary monitor so it doesn't stay on the teleprompter.
+                if (m_settings.mode == OverlayMode::Watermark && hTargetMon) {
+                    if (const MonitorInfo* mon = Monitor::Instance().GetByHandle(hTargetMon)) {
+                        const auto& flipMons = Config::Instance().Get().flip.monitors;
+                        bool isConfiguredFlip = FlipManager::Instance().IsFlipped(mon->GetId());
+                        if (!isConfiguredFlip) {
+                            for (const auto& fm : flipMons) {
+                                if (mon->MatchesId(fm)) {
+                                    isConfiguredFlip = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!mon->isPrimary && isConfiguredFlip) {
+                            POINT zero = { 0, 0 };
+                            hTargetMon = MonitorFromPoint(zero, MONITOR_DEFAULTTOPRIMARY);
+                        }
+                    }
+                }
                 break;
+            }
             case MonitorSelection::Primary:
-                targetMonitor = Monitor::Instance().GetPrimary();
-                break;
             case MonitorSelection::All:
-                // For 'all', use primary for position calculation
-                targetMonitor = Monitor::Instance().GetPrimary();
+            default: {
+                POINT zero = { 0, 0 };
+                hTargetMon = MonitorFromPoint(zero, MONITOR_DEFAULTTOPRIMARY);
                 break;
+            }
         }
 
-        if (targetMonitor) {
-            monitorRect = targetMonitor->workArea;
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        if (hTargetMon && GetMonitorInfoW(hTargetMon, &mi)) {
+            monitorRect = mi.rcWork;
         } else {
-            // Fallback to screen dimensions
+            // Fallback to primary screen dimensions
             monitorRect.left = 0;
             monitorRect.top = 0;
             monitorRect.right = GetSystemMetrics(SM_CXSCREEN);
@@ -891,13 +965,11 @@ void OverlayWindow::CalculateWindowPosition(int& x, int& y, int width, int heigh
             LOG_WARN("Unknown position value %d, defaulting to top center", static_cast<int>(m_settings.position));
             break;
     }
-    
-    LOG_DEBUG("CalculateWindowPosition result: x=%d, y=%d (monitor top=%ld, bottom=%ld)",
-              x, y, monitorRect.top, monitorRect.bottom);
 }
 
 void OverlayWindow::UpdateWindowPosition() {
-    if (!m_hwnd) return;
+    if (!m_hwnd || m_updatingPosition) return;
+    m_updatingPosition = true;
 
     // Calculate content size based on mode and actual text
     int contentWidth, contentHeight;
@@ -923,6 +995,7 @@ void OverlayWindow::UpdateWindowPosition() {
 
     int x, y;
     CalculateWindowPosition(x, y, m_windowWidth, m_windowHeight);
+    LOG_DEBUG("UpdateWindowPosition: pos=(%d,%d) size=(%d,%d)", x, y, m_windowWidth, m_windowHeight);
 
     SetWindowPos(m_hwnd, HWND_TOPMOST, x, y, m_windowWidth, m_windowHeight, 
         SWP_NOACTIVATE);
@@ -930,6 +1003,8 @@ void OverlayWindow::UpdateWindowPosition() {
     // Recreate render target for new size
     DiscardRenderResources();
     CreateRenderResources();
+
+    m_updatingPosition = false;
 }
 
 std::wstring OverlayWindow::FormatDisplayText() {

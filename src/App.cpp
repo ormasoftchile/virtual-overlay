@@ -380,9 +380,7 @@ void App::OnDpiChanged(HWND hwnd, UINT dpi, const RECT* suggested) {
     UNREFERENCED_PARAMETER(suggested);
     
     LOG_INFO("DPI changed to %u", dpi);
-
-    // Future: Update overlay sizing
-    // if (m_overlayWindow) m_overlayWindow->OnDpiChanged(dpi);
+    OnDisplayChange();
 }
 
 void App::OnSettingsChanged() {
@@ -475,6 +473,12 @@ void App::OnDesktopPollTimer() {
     
     // Call VirtualDesktop to check for desktop changes
     VirtualDesktop::Instance().CheckDesktopChange();
+
+    // Periodically verify overlay position matches current live monitor workArea
+    static unsigned int s_posCheckTick = 0;
+    if (++s_posCheckTick % 4 == 0) {
+        OverlayWindow::Instance().CheckPosition();
+    }
 }
 
 bool App::InitSettings() {

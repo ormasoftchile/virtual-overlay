@@ -1,4 +1,5 @@
 #include "FlipManager.h"
+#include "../overlay/OverlayWindow.h"
 #include "../utils/Logger.h"
 #include "../utils/Monitor.h"
 #include <magnification.h>
@@ -8,6 +9,14 @@
 #pragma comment(lib, "magnification.lib")
 
 namespace VirtualOverlay {
+
+namespace {
+struct ScopedUpdateGuard {
+    bool& flag;
+    explicit ScopedUpdateGuard(bool& f) : flag(f) { flag = true; }
+    ~ScopedUpdateGuard() { flag = false; }
+};
+}  // namespace
 
 FlipManager& FlipManager::Instance() {
     static FlipManager instance;
@@ -34,6 +43,16 @@ bool FlipManager::EnsureMagnifier() {
     return true;
 }
 
+void FlipManager::EnsureSystemCursorVisible() {
+    if (m_magInit) {
+        MagShowSystemCursor(TRUE);
+    } else if (MagInitialize()) {
+        MagShowSystemCursor(TRUE);
+        m_magInit = true;
+    }
+    m_systemCursorHidden = false;
+}
+
 bool FlipManager::Init(HINSTANCE hInstance, HWND hMainWnd) {
     if (m_initialized) {
         return true;
@@ -42,6 +61,9 @@ bool FlipManager::Init(HINSTANCE hInstance, HWND hMainWnd) {
     m_hInstance = hInstance;
     m_hMainWnd = hMainWnd;
     m_initialized = true;
+
+    // Ensure the system cursor starts visible even if a previous session left it hidden.
+    EnsureSystemCursorVisible();
 
     // Apply persisted flips.
     ApplySettings();
@@ -55,22 +77,23 @@ void FlipManager::Shutdown() {
         return;
     }
 
-    if (m_cursorTimerActive && m_hMainWnd) {
-        KillTimer(m_hMainWnd, TIMER_FLIP_CURSOR);
-        m_cursorTimerActive = false;
+    if (m_hMainWnd) {
+        if (m_cursorTimerActive) {
+            KillTimer(m_hMainWnd, TIMER_FLIP_CURSOR);
+            m_cursorTimerActive = false;
+        }
+        KillTimer(m_hMainWnd, TIMER_FLIP_DISPLAY_SETTLE);
+        m_settleChecksRemaining = 0;
     }
 
     m_mouseMirror.Stop();
+    EnsureSystemCursorVisible();
 
-    m_windows.clear();
+    DestroyAllMirrors();
     UpdateZOrderHook();
 
-    if (m_systemCursorHidden) {
-        MagShowSystemCursor(TRUE);
-        m_systemCursorHidden = false;
-    }
-
     if (m_magInit) {
+        MagShowSystemCursor(TRUE);
         MagUninitialize();
         m_magInit = false;
     }
@@ -79,36 +102,119 @@ void FlipManager::Shutdown() {
     LOG_INFO("FlipManager shutdown");
 }
 
+void FlipManager::DestroyAllMirrors() {
+    EnsureSystemCursorVisible();
+
+    // Move map to local before destroying so re-entrant STA message pumping
+    // inside Windows.Graphics.Capture cannot touch the same MirrorWindow twice.
+    auto windows = std::move(m_windows);
+    m_windows.clear();
+    for (auto& [name, mirror] : windows) {
+        if (mirror) {
+            mirror->Destroy();
+        }
+    }
+}
+
 bool FlipManager::IsFlipped(const std::wstring& deviceName) const {
-    return m_windows.find(deviceName) != m_windows.end();
+    if (deviceName.empty()) {
+        return false;
+    }
+    for (const auto& [key, mirror] : m_windows) {
+        if (_wcsicmp(key.c_str(), deviceName.c_str()) == 0) {
+            return true;
+        }
+    }
+    if (const MonitorInfo* mon = Monitor::Instance().GetByName(deviceName)) {
+        for (const auto& [key, mirror] : m_windows) {
+            if (mon->MatchesId(key)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void FlipManager::ApplySettings() {
-    if (!m_initialized) {
+    if (!m_initialized || m_inUpdate) {
         return;
+    }
+    ScopedUpdateGuard guard(m_inUpdate);
+
+    // Migrate any legacy "\\.\DISPLAYx" entries in config to stable EDID friendly names (e.g. "MNN")
+    // when the corresponding monitor is connected and has a friendly name.
+    {
+        auto& mutableFlip = Config::Instance().GetMutable().flip;
+        bool migrated = false;
+        for (auto& cfgId : mutableFlip.monitors) {
+            if (cfgId.rfind(L"\\\\.\\DISPLAY", 0) == 0) {
+                if (const MonitorInfo* mon = Monitor::Instance().GetByName(cfgId)) {
+                    std::wstring stableId = mon->GetId();
+                    if (!stableId.empty() && _wcsicmp(stableId.c_str(), cfgId.c_str()) != 0) {
+                        LOG_INFO("FlipManager: migrating configured monitor '%ws' -> '%ws'",
+                                 cfgId.c_str(), stableId.c_str());
+                        cfgId = stableId;
+                        migrated = true;
+                    }
+                }
+            }
+        }
+        if (migrated) {
+            Persist();
+        }
     }
 
     const auto& flip = Config::Instance().Get().flip;
 
-    // Remove mirrors that are no longer configured.
+    // If flipping is globally disabled or no monitors are configured, tear down everything.
+    if (!flip.enabled || flip.monitors.empty()) {
+        if (!m_windows.empty()) {
+            DestroyAllMirrors();
+        }
+        RefreshCursorHandling();
+        return;
+    }
+
+    // Resolve which configured monitors are currently connected and eligible to mirror.
+    std::map<std::wstring, const MonitorInfo*> activeTargets;
+    for (const auto& configuredName : flip.monitors) {
+        const MonitorInfo* mon = Monitor::Instance().GetByName(configuredName);
+        if (!mon) {
+            LOG_WARN("FlipManager: configured monitor %ws not found", configuredName.c_str());
+            continue;
+        }
+        const std::wstring id = mon->GetId();
+        // Never mirror a secondary/teleprompter monitor while it is temporarily promoted
+        // to the Primary display at (0,0) during a KVM switch (while main monitors are
+        // disconnected or still training DisplayPort links).
+        if (mon->isPrimary && m_allowPrimaryFlip.find(id) == m_allowPrimaryFlip.end()) {
+            LOG_INFO("FlipManager: skipping mirror for %ws while it is the primary display at (%ld,%ld)",
+                     id.c_str(), mon->bounds.left, mon->bounds.top);
+            continue;
+        }
+        activeTargets[id] = mon;
+    }
+
+    // Remove mirrors that are no longer configured OR whose monitor is not currently eligible.
+    // Move out of m_windows before calling Destroy() to prevent re-entrancy issues.
+    std::vector<std::unique_ptr<MirrorWindow>> toDestroy;
     for (auto it = m_windows.begin(); it != m_windows.end();) {
-        const bool stillConfigured =
-            std::find(flip.monitors.begin(), flip.monitors.end(), it->first) != flip.monitors.end();
-        if (!stillConfigured) {
+        if (activeTargets.find(it->first) == activeTargets.end()) {
+            toDestroy.push_back(std::move(it->second));
             it = m_windows.erase(it);
         } else {
             ++it;
         }
     }
+    for (auto& mirror : toDestroy) {
+        if (mirror) {
+            mirror->Destroy();
+        }
+    }
 
     // Create/refresh mirrors for configured monitors that currently exist.
-    for (const auto& deviceName : flip.monitors) {
-        const MonitorInfo* mon = Monitor::Instance().GetByName(deviceName);
-        if (!mon) {
-            LOG_WARN("FlipManager: configured monitor %ws not found", deviceName.c_str());
-            continue;
-        }
-        CreateMirror(deviceName, mon->bounds, mon->handle);
+    for (const auto& [canonicalId, mon] : activeTargets) {
+        CreateMirror(canonicalId, mon->bounds, mon->handle);
     }
 
     RefreshCursorHandling();
@@ -136,10 +242,19 @@ void FlipManager::CreateMirror(const std::wstring& deviceName, const RECT& bound
 }
 
 void FlipManager::DestroyMirror(const std::wstring& deviceName) {
-    auto it = m_windows.find(deviceName);
-    if (it != m_windows.end()) {
-        it->second->Destroy();
-        m_windows.erase(it);
+    std::vector<std::unique_ptr<MirrorWindow>> toDestroy;
+    for (auto it = m_windows.begin(); it != m_windows.end();) {
+        if (_wcsicmp(it->first.c_str(), deviceName.c_str()) == 0) {
+            toDestroy.push_back(std::move(it->second));
+            it = m_windows.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto& mirror : toDestroy) {
+        if (mirror) {
+            mirror->Destroy();
+        }
     }
 }
 
@@ -148,22 +263,33 @@ void FlipManager::SetFlipped(const std::wstring& deviceName, bool flipped) {
         return;
     }
 
+    Monitor::Instance().Refresh();
+    const MonitorInfo* mon = Monitor::Instance().GetByName(deviceName);
+    const std::wstring targetId = mon ? mon->GetId() : deviceName;
+
+    if (mon && mon->isPrimary) {
+        if (flipped) {
+            m_allowPrimaryFlip.insert(targetId);
+        } else {
+            m_allowPrimaryFlip.erase(targetId);
+        }
+    }
+
     auto& monitors = Config::Instance().GetMutable().flip.monitors;
-    auto found = std::find(monitors.begin(), monitors.end(), deviceName);
+    monitors.erase(
+        std::remove_if(monitors.begin(), monitors.end(), [&](const std::wstring& entry) {
+            if (_wcsicmp(entry.c_str(), deviceName.c_str()) == 0 ||
+                _wcsicmp(entry.c_str(), targetId.c_str()) == 0) {
+                return true;
+            }
+            return mon && mon->MatchesId(entry);
+        }),
+        monitors.end());
 
     if (flipped) {
-        if (found == monitors.end()) {
-            monitors.push_back(deviceName);
-        }
-        if (const MonitorInfo* mon = Monitor::Instance().GetByName(deviceName)) {
-            CreateMirror(deviceName, mon->bounds, mon->handle);
-        } else {
-            LOG_WARN("FlipManager: cannot mirror %ws - monitor not found", deviceName.c_str());
-        }
+        monitors.push_back(targetId);
     } else {
-        if (found != monitors.end()) {
-            monitors.erase(found);
-        }
+        DestroyMirror(targetId);
         DestroyMirror(deviceName);
     }
 
@@ -171,7 +297,7 @@ void FlipManager::SetFlipped(const std::wstring& deviceName, bool flipped) {
     Config::Instance().GetMutable().flip.enabled = !monitors.empty();
 
     Persist();
-    RefreshCursorHandling();
+    ApplySettings();
 }
 
 void FlipManager::Toggle(const std::wstring& deviceName) {
@@ -202,17 +328,70 @@ void FlipManager::ToggleUnderCursor() {
         LOG_WARN("FlipManager: no monitor under cursor for hotkey toggle");
         return;
     }
-    LOG_INFO("FlipManager: toggling flip for monitor %ws [%ld,%ld - %ld,%ld]",
-             mon->name.c_str(), mon->bounds.left, mon->bounds.top, mon->bounds.right, mon->bounds.bottom);
-    Toggle(mon->name);
+    const std::wstring id = mon->GetId();
+    LOG_INFO("FlipManager: toggling flip for monitor %ws (%ws) [%ld,%ld - %ld,%ld]",
+             id.c_str(), mon->name.c_str(),
+             mon->bounds.left, mon->bounds.top, mon->bounds.right, mon->bounds.bottom);
+    Toggle(id);
 }
 
 void FlipManager::OnDisplayChanged() {
     if (!m_initialized) {
         return;
     }
+
+    LOG_INFO("FlipManager: display change detected, hiding mirrors, restoring cursor, and scheduling settle");
+
+    // Pure Win32 immediate actions (safe inside sent WM_DISPLAYCHANGE without pumping COM STA):
+    EnsureSystemCursorVisible();
+    m_mouseMirror.Stop();
+    if (m_cursorTimerActive && m_hMainWnd) {
+        KillTimer(m_hMainWnd, TIMER_FLIP_CURSOR);
+        m_cursorTimerActive = false;
+    }
+    for (auto& [name, mirror] : m_windows) {
+        if (mirror && mirror->GetHwnd()) {
+            ShowWindow(mirror->GetHwnd(), SW_HIDE);
+        }
+    }
+
+    // Defer WGC COM teardown and monitor re-evaluation to the posted timer loop
+    // so we never enter Windows.Graphics.Capture.dll inside a sent WM_DISPLAYCHANGE message.
+    m_pendingTeardown = true;
+    m_settleChecksRemaining = 10;  // 10 * 500ms = 5 seconds of settle checks for KVM link training
+    if (m_hMainWnd) {
+        SetTimer(m_hMainWnd, TIMER_FLIP_DISPLAY_SETTLE, TIMER_FLIP_DISPLAY_SETTLE_MS, nullptr);
+    }
+}
+
+void FlipManager::OnDisplaySettleTimer() {
+    if (!m_initialized || m_inUpdate) {
+        return;
+    }
+
+    if (m_pendingTeardown) {
+        m_pendingTeardown = false;
+        EnsureSystemCursorVisible();
+        m_mouseMirror.Stop();
+        DestroyAllMirrors();
+    }
+
     Monitor::Instance().Refresh();
+    OverlayWindow::Instance().CheckPosition();
     ApplySettings();
+
+    if (m_windows.empty()) {
+        EnsureSystemCursorVisible();
+    }
+
+    if (m_settleChecksRemaining > 0) {
+        --m_settleChecksRemaining;
+        if (m_hMainWnd) {
+            SetTimer(m_hMainWnd, TIMER_FLIP_DISPLAY_SETTLE, 500, nullptr);
+        }
+    } else if (m_hMainWnd) {
+        KillTimer(m_hMainWnd, TIMER_FLIP_DISPLAY_SETTLE);
+    }
 }
 
 void FlipManager::Persist() {
@@ -336,9 +515,8 @@ void FlipManager::RefreshCursorHandling() {
         m_mouseMirror.Stop();
     }
 
-    // Cursor visibility timer (needed whenever we draw a surrogate cursor so we
-    // can hide/show the real system cursor as it enters/leaves the mirror).
-    const bool needTimer = WantSurrogateCursor() && !rects.empty();
+    // Cursor visibility & mirror health watchdog timer (active whenever any monitor is mirrored).
+    const bool needTimer = !rects.empty();
     if (needTimer && !m_cursorTimerActive && m_hMainWnd) {
         SetTimer(m_hMainWnd, TIMER_FLIP_CURSOR, TIMER_FLIP_CURSOR_MS, nullptr);
         m_cursorTimerActive = true;
@@ -356,8 +534,7 @@ void FlipManager::UpdateCursorVisibility() {
     // surrogate (mirrored) cursor drawn into the flipped content is visible.
     if (!WantSurrogateCursor() || m_windows.empty()) {
         if (m_systemCursorHidden) {
-            MagShowSystemCursor(TRUE);
-            m_systemCursorHidden = false;
+            EnsureSystemCursorVisible();
         }
         return;
     }
@@ -374,16 +551,83 @@ void FlipManager::UpdateCursorVisibility() {
     }
 
     if (overMirrored && !m_systemCursorHidden) {
+        EnsureMagnifier();
         MagShowSystemCursor(FALSE);
         m_systemCursorHidden = true;
     } else if (!overMirrored && m_systemCursorHidden) {
-        MagShowSystemCursor(TRUE);
-        m_systemCursorHidden = false;
+        EnsureSystemCursorVisible();
     }
 }
 
 void FlipManager::OnCursorTimer() {
+    if (m_inUpdate || m_pendingTeardown) {
+        return;
+    }
+
     UpdateCursorVisibility();
+
+    if (m_windows.empty()) {
+        return;
+    }
+
+    bool needsResync = false;
+    ++m_watchdogTick;
+    const bool checkTopology = (m_watchdogTick % 20 == 0);  // Every ~600ms
+    if (checkTopology) {
+        Monitor::Instance().Refresh();
+        // Periodically reinforce system cursor visibility when not over a mirror
+        if (!m_systemCursorHidden && m_magInit) {
+            MagShowSystemCursor(TRUE);
+        }
+    }
+
+    for (const auto& [id, mirror] : m_windows) {
+        if (!mirror || !mirror->IsValid() || mirror->IsCaptureLost()) {
+            LOG_WARN("FlipManager: capture lost or invalid mirror for %ws, resyncing", id.c_str());
+            needsResync = true;
+            break;
+        }
+
+        // Verify Windows hasn't migrated/resized our top-level mirror window (e.g. to (0,0) during KVM switch)
+        RECT actualRect = {};
+        if (!GetWindowRect(mirror->GetHwnd(), &actualRect) || !EqualRect(&actualRect, &mirror->Bounds())) {
+            LOG_WARN("FlipManager: mirror window for %ws moved from [%ld,%ld-%ld,%ld] to [%ld,%ld-%ld,%ld], resyncing",
+                     id.c_str(),
+                     mirror->Bounds().left, mirror->Bounds().top, mirror->Bounds().right, mirror->Bounds().bottom,
+                     actualRect.left, actualRect.top, actualRect.right, actualRect.bottom);
+            needsResync = true;
+            break;
+        }
+
+        // Verify the HMONITOR is still valid and has the same bounds, and is not Primary unless allowed
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        if (!GetMonitorInfoW(mirror->MonitorHandle(), &mi) || !EqualRect(&mi.rcMonitor, &mirror->Bounds())) {
+            LOG_WARN("FlipManager: HMONITOR bounds changed or invalidated for %ws, resyncing", id.c_str());
+            needsResync = true;
+            break;
+        }
+        if ((mi.dwFlags & MONITORINFOF_PRIMARY) != 0 && m_allowPrimaryFlip.find(id) == m_allowPrimaryFlip.end()) {
+            LOG_WARN("FlipManager: %ws became primary display during transition, resyncing", id.c_str());
+            needsResync = true;
+            break;
+        }
+
+        // Periodically verify via QueryDisplayConfig that the target monitor by friendlyName/ID
+        // still maps to this exact HMONITOR and bounds.
+        if (checkTopology) {
+            const MonitorInfo* mon = Monitor::Instance().GetByName(id);
+            if (!mon || mon->handle != mirror->MonitorHandle() || !EqualRect(&mon->bounds, &mirror->Bounds())) {
+                LOG_WARN("FlipManager: display topology changed for %ws, resyncing", id.c_str());
+                needsResync = true;
+                break;
+            }
+        }
+    }
+
+    if (needsResync) {
+        OnDisplayChanged();
+    }
 }
 
 }  // namespace VirtualOverlay

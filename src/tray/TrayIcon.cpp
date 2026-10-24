@@ -119,7 +119,7 @@ void TrayIcon::BuildContextMenu() {
                 std::wstring label = mon.GetDisplayName(i);
 
                 UINT flags = MF_STRING;
-                if (m_isFlipped && m_isFlipped(mon.name)) {
+                if (m_isFlipped && m_isFlipped(mon.GetId())) {
                     flags |= MF_CHECKED;
                 }
 
@@ -338,7 +338,7 @@ void TrayIcon::ShowContextMenu() {
                 const auto& monitors = Monitor::Instance().GetMonitors();
                 const size_t index = cmd - IDM_TRAY_FLIP_BASE;
                 if (index < monitors.size() && m_onFlipToggle) {
-                    m_onFlipToggle(monitors[index].name);
+                    m_onFlipToggle(monitors[index].GetId());
                 }
             }
             break;

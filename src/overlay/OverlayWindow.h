@@ -52,6 +52,9 @@ public:
     // Called when display configuration changes
     void OnDisplayChanged();
 
+    // Verify and self-heal overlay window coordinates if monitor workArea changed
+    void CheckPosition();
+
 private:
     OverlayWindow();
     ~OverlayWindow();
@@ -88,6 +91,7 @@ private:
     HWND m_hwnd = nullptr;
     HINSTANCE m_hInstance = nullptr;
     bool m_initialized = false;
+    bool m_updatingPosition = false;
 
     // Settings and state
     OverlaySettings m_settings;

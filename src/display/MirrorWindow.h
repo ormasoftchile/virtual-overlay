@@ -21,7 +21,7 @@ public:
     MirrorWindow& operator=(const MirrorWindow&) = delete;
 
     // Create and show the mirror covering the given monitor bounds.
-    // deviceName is the stable monitor device name (e.g. "\\.\DISPLAY2").
+    // deviceName is the stable monitor identifier (e.g. "MNN").
     bool Create(HINSTANCE hInstance, const std::wstring& deviceName, const RECT& bounds, HMONITOR hMonitor);
 
     // Reposition/resize to new monitor bounds.
@@ -37,6 +37,7 @@ public:
     void Destroy();
 
     bool IsValid() const { return m_hwnd != nullptr; }
+    bool IsCaptureLost() const;
     const std::wstring& DeviceName() const { return m_deviceName; }
     const RECT& Bounds() const { return m_bounds; }
     HMONITOR MonitorHandle() const { return m_hMonitor; }

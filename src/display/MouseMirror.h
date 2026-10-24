@@ -54,10 +54,10 @@ private:
     mutable std::mutex m_rectsMutex;
     std::vector<RECT> m_rects;
 
-    // Touched only by the hook thread.
+    // Touched by the hook thread; m_hasAnchor is atomic so UpdateRects can force re-anchoring.
     POINT m_virtual = {LONG_MIN, LONG_MIN};  // user-perceived position
     POINT m_lastSet = {LONG_MIN, LONG_MIN};  // last real position (actual)
-    bool m_hasAnchor = false;
+    std::atomic<bool> m_hasAnchor{ false };
 
     static MouseMirror* s_instance;
 };

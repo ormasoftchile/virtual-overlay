@@ -30,7 +30,7 @@ bool MouseMirror::Start(const std::vector<RECT>& monitorRects) {
     }
 
     s_instance = this;
-    m_hasAnchor = false;
+    m_hasAnchor.store(false);
     m_hookOk = false;
     m_started = false;
 
@@ -54,6 +54,8 @@ void MouseMirror::UpdateRects(const std::vector<RECT>& monitorRects) {
         std::lock_guard<std::mutex> lock(m_rectsMutex);
         m_rects = monitorRects;
     }
+    // Force re-anchoring on next mouse move when monitor geometry changes.
+    m_hasAnchor.store(false);
     if (monitorRects.empty()) {
         Stop();
     }
@@ -69,7 +71,7 @@ void MouseMirror::Stop() {
     if (s_instance == this) {
         s_instance = nullptr;
     }
-    m_hasAnchor = false;
+    m_hasAnchor.store(false);
 }
 
 void MouseMirror::ThreadMain() {
@@ -125,10 +127,10 @@ bool MouseMirror::HandleMove(const POINT& physical) {
     // (Re)anchor when starting, or when something else moved the cursor
     // (another app's SetCursorPos, touch, pen, display change, ...). Reflection
     // is its own inverse, so the virtual position is reflect(real).
-    if (!m_hasAnchor || current.x != m_lastSet.x || current.y != m_lastSet.y) {
+    if (!m_hasAnchor.load() || current.x != m_lastSet.x || current.y != m_lastSet.y) {
         m_virtual = Reflect(current);
         m_lastSet = current;
-        m_hasAnchor = true;
+        m_hasAnchor.store(true);
     }
 
     const LONG dx = physical.x - current.x;
