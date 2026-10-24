@@ -15,6 +15,8 @@ constexpr UINT TIMER_DESKTOP_POLL_MS = 150;  // Desktop switch detection
 
 // Hotkey IDs
 constexpr int HOTKEY_OVERLAY_TOGGLE = 1;
+constexpr int HOTKEY_FLIP_TOGGLE = 2;
+constexpr int HOTKEY_SETTINGS = 3;
 
 // Application lifecycle controller
 class App {
@@ -46,6 +48,9 @@ public:
     // Overlay event handler
     void OnDesktopSwitched(int desktopIndex, const std::wstring& desktopName);
     void OnToggleOverlay();
+
+    // Flip (teleprompter mirror) event handler
+    void OnToggleFlip();
 
     // Settings window
     void OpenSettings();

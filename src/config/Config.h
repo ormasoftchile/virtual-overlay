@@ -3,6 +3,7 @@
 #include <string>
 #include <optional>
 #include <cstdint>
+#include <vector>
 
 namespace VirtualOverlay {
 
@@ -98,11 +99,31 @@ struct OverlayConfig {
     OverlayAnimationConfig animation;
 };
 
+// How the mouse cursor is handled on a mirrored monitor
+enum class FlipCursorMode {
+    None,        // No cursor assistance; the real system cursor stays as-is
+    Magnified,   // Hide the real cursor and draw a mirrored surrogate cursor
+                 // into the flipped content (correct clicks/hover/drag)
+    Inverted     // Same surrogate-cursor behaviour as Magnified (kept for
+                 // config compatibility)
+};
+
+// Per-monitor horizontal flip (teleprompter mirror) settings
+struct FlipConfig {
+    bool enabled = false;
+    bool invertMouse = true;                   // Visible pointer moves mirrored to the hand (natural through glass)
+    std::wstring toggleHotkey = L"Ctrl+Shift+F";
+    FlipCursorMode cursorMode = FlipCursorMode::Magnified;
+    // Monitors to mirror, identified by their stable device name (e.g. "\\.\DISPLAY2")
+    std::vector<std::wstring> monitors;
+};
+
 // Complete configuration
 struct AppConfig {
     std::wstring schema = L"virtual-overlay-config-v1";
     GeneralConfig general;
     OverlayConfig overlay;
+    FlipConfig flip;
 };
 
 // Configuration manager
@@ -136,6 +157,8 @@ public:
     static BlurType StringToBlur(const std::string& str);
     static std::string ModeToString(OverlayMode mode);
     static OverlayMode StringToMode(const std::string& str);
+    static std::string FlipCursorModeToString(FlipCursorMode mode);
+    static FlipCursorMode StringToFlipCursorMode(const std::string& str);
 
 private:
     Config();

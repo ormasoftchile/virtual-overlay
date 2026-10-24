@@ -7,6 +7,7 @@
 #include "App.h"
 #include "utils/Logger.h"
 #include "config/Config.h"
+#include "display/FlipManager.h"
 #include "tray/TrayIcon.h"
 
 // Application name for mutex and window class
@@ -40,6 +41,9 @@ int WINAPI WinMain(
     UNREFERENCED_PARAMETER(nCmdShow);
 
     g_hInstance = hInstance;
+
+    // Explicitly set PerMonitorV2 DPI awareness
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     // Initialize COM for virtual desktop API
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -185,6 +189,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 VirtualOverlay::App::Instance().OnDesktopPollTimer();
             } else if (wParam == VirtualOverlay::TIMER_TRAY_RETRY) {
                 VirtualOverlay::TrayIcon::Instance().OnRetryTimer();
+            } else if (wParam == VirtualOverlay::TIMER_FLIP_CURSOR) {
+                VirtualOverlay::FlipManager::Instance().OnCursorTimer();
             }
             return 0;
 
@@ -218,6 +224,10 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         case WM_HOTKEY:
             if (wParam == VirtualOverlay::HOTKEY_OVERLAY_TOGGLE) {
                 VirtualOverlay::App::Instance().OnToggleOverlay();
+            } else if (wParam == VirtualOverlay::HOTKEY_FLIP_TOGGLE) {
+                VirtualOverlay::App::Instance().OnToggleFlip();
+            } else if (wParam == VirtualOverlay::HOTKEY_SETTINGS) {
+                VirtualOverlay::App::Instance().OpenSettings();
             }
             return 0;
 

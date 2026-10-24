@@ -12,6 +12,7 @@ namespace VirtualOverlay {
 enum class SettingsTab {
     General = 0,
     Overlay,
+    Flip,
     About
 };
 
@@ -71,6 +72,7 @@ private:
 
     HWND m_hPageGeneral = nullptr;
     HWND m_hPageOverlay = nullptr;
+    HWND m_hPageFlip = nullptr;
     HWND m_hPageAbout = nullptr;
 
     SettingsTab m_currentTab = SettingsTab::General;

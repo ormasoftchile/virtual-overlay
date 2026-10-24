@@ -1,5 +1,7 @@
 #include "SettingsPages.h"
 #include "SettingsWindow.h"
+#include "../utils/Monitor.h"
+#include <algorithm>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
@@ -459,6 +461,128 @@ void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config) {
 }
 
 // =============================================================================
+// Flip Screen Page (Teleprompter Mirror)
+// =============================================================================
+
+HWND SettingsPages::CreateFlipPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage) {
+    RegisterPageClass(hInstance);
+
+    HWND hPage = CreateWindowExW(
+        WS_EX_CONTROLPARENT, PAGE_CLASS, nullptr,
+        WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+        rcPage.left, rcPage.top,
+        rcPage.right - rcPage.left,
+        rcPage.bottom - rcPage.top,
+        hParent, nullptr, hInstance, nullptr
+    );
+
+    if (!hPage) return nullptr;
+
+    int y = 14;
+    int x = 20;
+    int ctrlH = 20;
+    int spacing = 24;
+
+    // Enable flip checkbox
+    CreateCheckbox(hPage, hInstance, IDC_FLIP_ENABLE,
+                   L"Enable horizontal flip (teleprompter mirror)", x, y, 350, ctrlH);
+    y += spacing;
+
+    // Monitor selection header
+    CreateLabel(hPage, hInstance, 0, L"Select screen(s) to flip:", x, y, 300, ctrlH);
+    y += 22;
+
+    // List detected monitors
+    const auto& monitors = Monitor::Instance().GetMonitors();
+    if (monitors.empty()) {
+        CreateLabel(hPage, hInstance, 0, L"No monitors detected", x + 15, y, 200, ctrlH);
+        y += 22;
+    } else {
+        for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
+            const auto& mon = monitors[i];
+            std::wstring label = mon.GetDisplayName(i);
+
+            CreateCheckbox(hPage, hInstance,
+                           IDC_FLIP_MONITOR_BASE + static_cast<int>(i),
+                           label.c_str(), x + 15, y, 420, ctrlH);
+            y += 22;
+        }
+    }
+    y += 4;
+
+    // Mouse inversion checkbox
+    CreateCheckbox(hPage, hInstance, IDC_FLIP_INVERT_MOUSE,
+                   L"Mirror pointer movement (natural through the glass)", x, y, 420, ctrlH);
+    y += spacing;
+
+    // Cursor mode combo
+    CreateLabel(hPage, hInstance, 0, L"Pointer:", x, y + 2, 100, ctrlH);
+    HWND hCursorMode = CreateComboBox(hPage, hInstance, IDC_FLIP_CURSOR_MODE, x + 105, y, 200, 100);
+    SendMessageW(hCursorMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Mirrored (click-accurate)"));
+    SendMessageW(hCursorMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"System (unmirrored)"));
+    y += spacing;
+
+    // Hotkey
+    CreateLabel(hPage, hInstance, 0, L"Toggle hotkey:", x, y + 2, 100, ctrlH);
+    CreateEdit(hPage, hInstance, IDC_FLIP_HOTKEY, x + 105, y, 160, ctrlH);
+    y += spacing + 4;
+
+    // Helpful instruction label
+    CreateLabel(hPage, hInstance, 0,
+                L"Tip: Press Ctrl+Shift+F to toggle flip on the screen under your mouse,\n"
+                L"or right-click the Virtual Overlay tray icon -> 'Flip screen'.",
+                x, y, 420, 36);
+
+    return hPage;
+}
+
+void SettingsPages::LoadFlipSettings(HWND hPage, const FlipConfig& config) {
+    if (!hPage) return;
+
+    CheckDlgButton(hPage, IDC_FLIP_ENABLE, config.enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hPage, IDC_FLIP_INVERT_MOUSE, config.invertMouse ? BST_CHECKED : BST_UNCHECKED);
+    SetDlgItemTextW(hPage, IDC_FLIP_HOTKEY, config.toggleHotkey.c_str());
+
+    const int cursorSel = (config.cursorMode == FlipCursorMode::None) ? 1 : 0;
+    SendDlgItemMessageW(hPage, IDC_FLIP_CURSOR_MODE, CB_SETCURSEL, cursorSel, 0);
+
+    const auto& monitors = Monitor::Instance().GetMonitors();
+    for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
+        bool isFlipped = std::find(config.monitors.begin(), config.monitors.end(), monitors[i].name) != config.monitors.end();
+        CheckDlgButton(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i),
+                       isFlipped ? BST_CHECKED : BST_UNCHECKED);
+    }
+}
+
+void SettingsPages::SaveFlipSettings(HWND hPage, FlipConfig& config) {
+    if (!hPage) return;
+
+    config.enabled = (IsDlgButtonChecked(hPage, IDC_FLIP_ENABLE) == BST_CHECKED);
+    config.invertMouse = (IsDlgButtonChecked(hPage, IDC_FLIP_INVERT_MOUSE) == BST_CHECKED);
+
+    wchar_t hotkeyBuf[64] = {};
+    GetDlgItemTextW(hPage, IDC_FLIP_HOTKEY, hotkeyBuf, 64);
+    if (wcslen(hotkeyBuf) > 0) {
+        config.toggleHotkey = hotkeyBuf;
+    }
+
+    LRESULT curSel = SendDlgItemMessageW(hPage, IDC_FLIP_CURSOR_MODE, CB_GETCURSEL, 0, 0);
+    if (curSel == 0) config.cursorMode = FlipCursorMode::Magnified;
+    else if (curSel == 1) config.cursorMode = FlipCursorMode::None;
+
+    config.monitors.clear();
+    const auto& monitors = Monitor::Instance().GetMonitors();
+    for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
+        if (IsDlgButtonChecked(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i)) == BST_CHECKED) {
+            config.monitors.push_back(monitors[i].name);
+        }
+    }
+    if (!config.monitors.empty()) {
+        config.enabled = true;
+    }
+}
+
+// =============================================================================
 // About Page
 // =============================================================================
 
@@ -487,7 +611,7 @@ HWND SettingsPages::CreateAboutPage(HWND hParent, HINSTANCE hInstance, const REC
 
     // Version
     std::wstring version = L"Version: ";
-    version += L"1.0.1";
+    version += L"1.1.0";
     CreateLabel(hPage, hInstance, IDC_ABOUT_VERSION, version.c_str(), x, y, 200, ctrlH);
     y += spacing;
 

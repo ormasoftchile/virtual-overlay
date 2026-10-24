@@ -40,9 +40,13 @@ wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 
 ⚠️ The `-ext WixToolset.Util.wixext` flag is required. The build will fail without it.
 
-Expected install location: `%LocalAppData%\VirtualOverlay\`
+Expected install location: `%ProgramFiles%\VirtualOverlay\` (per-machine; prompts for admin).
 
-Autostart is registered during install by writing the current user `Run` key. No manual registration is required.
+The install is per-machine because signed builds are marked `uiAccess="true"` (see `VO_UIACCESS` in `CMakeLists.txt`), which Windows only honors for signed EXEs in Program Files. A signed `build\Release\virtual-overlay.exe` therefore will not launch from `build\`; install the MSI to run it. `-SkipSign` builds are not marked uiAccess and run from anywhere.
+
+Earlier versions installed per-user to `%LocalAppData%\VirtualOverlay\`. MSI major upgrades cannot cross install scopes, so uninstall a per-user version before installing this one.
+
+Autostart is registered during install by writing the installing user's `Run` key. No manual registration is required.
 
 ## Required Assets (Before Building)
 
@@ -88,7 +92,8 @@ Side panel image for welcome/completion dialogs.
 | Purpose | GUID | Notes |
 |---------|------|-------|
 | UpgradeCode | F8E3B5A1-7C2D-4E9F-B6A8-3D1C5E7F9A2B | Never change - identifies product family |
-| MainExecutable | a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d | Component GUID |
+| MainExecutable | EA0F230B-AD57-44D8-9E3A-F05D8A0AD277 | Component GUID (Package.wxs, Program Files) |
+| AutoStart | 5404BA2C-0AF9-4B52-B45F-755D6DA263E6 | Component GUID (Package.wxs, HKCU Run key) |
 | ConfigDir | c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f | Component GUID |
 | ApplicationShortcut | b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e | Component GUID |
 | CleanupAutoStart | d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a | Component GUID |

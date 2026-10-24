@@ -170,6 +170,28 @@ bool Config::Load(const std::wstring& filePath) {
                 if (a.contains("slideDistance")) m_config.overlay.animation.slideDistance = a["slideDistance"].get<int>();
             }
         }
+
+        // Parse flip (per-monitor mirror) settings
+        if (j.contains("flip")) {
+            auto& f = j["flip"];
+            if (f.contains("enabled")) m_config.flip.enabled = f["enabled"].get<bool>();
+            if (f.contains("invertMouse")) m_config.flip.invertMouse = f["invertMouse"].get<bool>();
+            if (f.contains("toggleHotkey")) {
+                std::string hotkey = f["toggleHotkey"].get<std::string>();
+                m_config.flip.toggleHotkey = Utf8ToWide(hotkey);
+            }
+            if (f.contains("cursorMode")) {
+                m_config.flip.cursorMode = StringToFlipCursorMode(f["cursorMode"].get<std::string>());
+            }
+            if (f.contains("monitors") && f["monitors"].is_array()) {
+                m_config.flip.monitors.clear();
+                for (const auto& mon : f["monitors"]) {
+                    if (mon.is_string()) {
+                        m_config.flip.monitors.push_back(Utf8ToWide(mon.get<std::string>()));
+                    }
+                }
+            }
+        }
         
         // Clamp values to valid ranges
         ClampValues(m_config);
@@ -256,6 +278,16 @@ bool Config::Save(const std::wstring& filePath) {
         j["overlay"]["animation"]["fadeOutDurationMs"] = m_config.overlay.animation.fadeOutDurationMs;
         j["overlay"]["animation"]["slideIn"] = m_config.overlay.animation.slideIn;
         j["overlay"]["animation"]["slideDistance"] = m_config.overlay.animation.slideDistance;
+        
+        // Flip (per-monitor mirror)
+        j["flip"]["enabled"] = m_config.flip.enabled;
+        j["flip"]["invertMouse"] = m_config.flip.invertMouse;
+        j["flip"]["toggleHotkey"] = WideToUtf8(m_config.flip.toggleHotkey);
+        j["flip"]["cursorMode"] = FlipCursorModeToString(m_config.flip.cursorMode);
+        j["flip"]["monitors"] = json::array();
+        for (const auto& mon : m_config.flip.monitors) {
+            j["flip"]["monitors"].push_back(WideToUtf8(mon));
+        }
         
         // Write to temp file first, then rename (atomic save)
         fs::path tempPath = path;
@@ -403,6 +435,21 @@ OverlayMode Config::StringToMode(const std::string& str) {
     if (str == "notification") return OverlayMode::Notification;
     if (str == "watermark") return OverlayMode::Watermark;
     return OverlayMode::Notification;  // Default
+}
+
+std::string Config::FlipCursorModeToString(FlipCursorMode mode) {
+    switch (mode) {
+        case FlipCursorMode::None: return "none";
+        case FlipCursorMode::Magnified: return "magnified";
+        case FlipCursorMode::Inverted: return "inverted";
+        default: return "magnified";
+    }
+}
+
+FlipCursorMode Config::StringToFlipCursorMode(const std::string& str) {
+    if (str == "none") return FlipCursorMode::None;
+    if (str == "inverted") return FlipCursorMode::Inverted;
+    return FlipCursorMode::Magnified;  // Default
 }
 
 uint32_t Config::ParseColor(const std::string& hex) {

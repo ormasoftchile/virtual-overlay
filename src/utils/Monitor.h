@@ -12,7 +12,10 @@ struct MonitorInfo {
     RECT workArea;
     bool isPrimary;
     std::wstring name;
+    std::wstring friendlyName;
     UINT dpi;
+
+    std::wstring GetDisplayName(size_t index) const;
 };
 
 class Monitor {
@@ -39,6 +42,9 @@ public:
 
     // Get monitor by handle
     const MonitorInfo* GetByHandle(HMONITOR handle) const;
+
+    // Get monitor by stable device name (e.g. "\\.\DISPLAY2")
+    const MonitorInfo* GetByName(const std::wstring& name) const;
 
     // Get monitor rect for a given handle
     RECT GetMonitorRect(HMONITOR handle) const;

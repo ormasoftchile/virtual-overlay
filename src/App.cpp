@@ -5,6 +5,7 @@
 #include "overlay/OverlayWindow.h"
 #include "overlay/OverlayConfig.h"
 #include "desktop/VirtualDesktop.h"
+#include "display/FlipManager.h"
 #include "settings/SettingsWindow.h"
 #include "tray/TrayIcon.h"
 #include <algorithm>
@@ -126,6 +127,29 @@ bool App::Init(HINSTANCE hInstance, HWND hMainWnd) {
         }
     }
 
+    // Initialize per-monitor horizontal flip (teleprompter mirror)
+    FlipManager::Instance().Init(m_hInstance, m_hMainWnd);
+
+    // Register flip toggle hotkey
+    UINT flipMods = 0, flipVk = 0;
+    if (ParseHotkeyString(config.flip.toggleHotkey, flipMods, flipVk)) {
+        if (RegisterHotKey(m_hMainWnd, HOTKEY_FLIP_TOGGLE, flipMods | MOD_NOREPEAT, flipVk)) {
+            LOG_INFO("Registered flip toggle hotkey: %ws", config.flip.toggleHotkey.c_str());
+        } else {
+            LOG_WARN("Failed to register flip toggle hotkey");
+        }
+    }
+
+    // Register settings hotkey
+    UINT settingsMods = 0, settingsVk = 0;
+    if (ParseHotkeyString(config.general.settingsHotkey, settingsMods, settingsVk)) {
+        if (RegisterHotKey(m_hMainWnd, HOTKEY_SETTINGS, settingsMods | MOD_NOREPEAT, settingsVk)) {
+            LOG_INFO("Registered settings hotkey: %ws", config.general.settingsHotkey.c_str());
+        } else {
+            LOG_WARN("Failed to register settings hotkey");
+        }
+    }
+
     m_initialized = true;
     m_running = true;
 
@@ -158,11 +182,16 @@ void App::Shutdown() {
     // Unregister hotkeys
     if (m_hMainWnd) {
         UnregisterHotKey(m_hMainWnd, HOTKEY_OVERLAY_TOGGLE);
+        UnregisterHotKey(m_hMainWnd, HOTKEY_FLIP_TOGGLE);
+        UnregisterHotKey(m_hMainWnd, HOTKEY_SETTINGS);
     }
 
     if (m_hMainWnd) {
         KillTimer(m_hMainWnd, TIMER_DESKTOP_POLL);
     }
+
+    // Shutdown flip (teleprompter mirror)
+    FlipManager::Instance().Shutdown();
 
     // Shutdown overlay first (depends on VirtualDesktop)
     if (m_overlayEnabled) {
@@ -309,6 +338,10 @@ void App::OnDesktopSwitched(int desktopIndex, const std::wstring& desktopName) {
     OverlayWindow::Instance().Show(desktopIndex, desktopName);
 }
 
+void App::OnToggleFlip() {
+    FlipManager::Instance().ToggleUnderCursor();
+}
+
 void App::OnToggleOverlay() {
     if (!m_overlayEnabled) {
         return;
@@ -337,6 +370,9 @@ void App::OnDisplayChange() {
     if (m_overlayEnabled) {
         OverlayWindow::Instance().OnDisplayChanged();
     }
+
+    // Re-apply mirrors to the refreshed monitor set
+    FlipManager::Instance().OnDisplayChanged();
 }
 
 void App::OnDpiChanged(HWND hwnd, UINT dpi, const RECT* suggested) {
@@ -408,6 +444,30 @@ void App::OnSettingsChanged() {
             }
         }
     }
+
+    // Re-apply flip settings
+    FlipManager::Instance().ApplySettings();
+
+    // Re-register hotkeys
+    if (m_hMainWnd) {
+        UnregisterHotKey(m_hMainWnd, HOTKEY_OVERLAY_TOGGLE);
+        UINT overlayMods = 0, overlayVk = 0;
+        if (ParseHotkeyString(config.general.overlayToggleHotkey, overlayMods, overlayVk)) {
+            RegisterHotKey(m_hMainWnd, HOTKEY_OVERLAY_TOGGLE, overlayMods | MOD_NOREPEAT, overlayVk);
+        }
+
+        UnregisterHotKey(m_hMainWnd, HOTKEY_FLIP_TOGGLE);
+        UINT flipMods = 0, flipVk = 0;
+        if (ParseHotkeyString(config.flip.toggleHotkey, flipMods, flipVk)) {
+            RegisterHotKey(m_hMainWnd, HOTKEY_FLIP_TOGGLE, flipMods | MOD_NOREPEAT, flipVk);
+        }
+
+        UnregisterHotKey(m_hMainWnd, HOTKEY_SETTINGS);
+        UINT settingsMods = 0, settingsVk = 0;
+        if (ParseHotkeyString(config.general.settingsHotkey, settingsMods, settingsVk)) {
+            RegisterHotKey(m_hMainWnd, HOTKEY_SETTINGS, settingsMods | MOD_NOREPEAT, settingsVk);
+        }
+    }
 }
 
 void App::OnDesktopPollTimer() {
@@ -455,6 +515,14 @@ bool App::InitTrayIcon() {
         PostMessageW(m_hMainWnd, WM_CLOSE, 0, 0);
     });
 
+    TrayIcon::Instance().SetFlipToggleCallback([](const std::wstring& deviceName) {
+        FlipManager::Instance().Toggle(deviceName);
+    });
+
+    TrayIcon::Instance().SetFlipStateQuery([](const std::wstring& deviceName) {
+        return FlipManager::Instance().IsFlipped(deviceName);
+    });
+
     LOG_INFO("Tray icon initialized; show deferred to message loop");
     return true;
 }
@@ -463,7 +531,7 @@ void App::ShowAbout() {
     MessageBoxW(
         m_hMainWnd,
         L"Virtual Overlay\n"
-        L"Version 1.0.1\n\n"
+        L"Version 1.1.0\n\n"
         L"A Windows utility for virtual desktop overlay\n"
         L"and desktop watermark display.\n\n"
         L"\u00A9 2026 Virtual Overlay Contributors",
