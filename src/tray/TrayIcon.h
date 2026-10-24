@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <functional>
+#include <string>
 
 namespace VirtualOverlay {
 
@@ -16,6 +17,9 @@ constexpr UINT IDM_TRAY_SETTINGS = 1001;
 constexpr UINT IDM_TRAY_ABOUT = 1002;
 constexpr UINT IDM_TRAY_EXIT = 1003;
 constexpr UINT IDM_TRAY_AUTOSTART = 1004;
+// Per-monitor flip items use IDM_TRAY_FLIP_BASE + monitor index.
+constexpr UINT IDM_TRAY_FLIP_BASE = 1100;
+constexpr UINT IDM_TRAY_FLIP_MAX = 32;
 
 // Tray icon manager
 class TrayIcon {
@@ -42,9 +46,13 @@ public:
 
     // Callbacks
     using MenuCallback = std::function<void()>;
+    using FlipCallback = std::function<void(const std::wstring&)>;
+    using FlipStateQuery = std::function<bool(const std::wstring&)>;
     void SetSettingsCallback(MenuCallback callback) { m_onSettings = callback; }
     void SetAboutCallback(MenuCallback callback) { m_onAbout = callback; }
     void SetExitCallback(MenuCallback callback) { m_onExit = callback; }
+    void SetFlipToggleCallback(FlipCallback callback) { m_onFlipToggle = callback; }
+    void SetFlipStateQuery(FlipStateQuery callback) { m_isFlipped = callback; }
 
 private:
     TrayIcon();
@@ -55,6 +63,7 @@ private:
     // Show context menu
     bool AddIcon();
     void ShowContextMenu();
+    void BuildContextMenu();
 
     // Auto-start helpers
     bool IsAutoStartEnabled();
@@ -75,6 +84,8 @@ private:
     MenuCallback m_onSettings;
     MenuCallback m_onAbout;
     MenuCallback m_onExit;
+    FlipCallback m_onFlipToggle;
+    FlipStateQuery m_isFlipped;
 };
 
 }  // namespace VirtualOverlay

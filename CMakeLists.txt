@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(virtual-overlay VERSION 1.0.1 LANGUAGES CXX)
+project(virtual-overlay VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,11 @@ target_link_libraries(virtual-overlay PRIVATE
     d2d1.lib
     dwrite.lib
     dwmapi.lib
+    d3d11.lib
+    dxgi.lib
+    windowsapp.lib
+    magnification.lib
+    windowscodecs.lib
     ole32.lib
     oleaut32.lib
     shell32.lib
@@ -54,9 +59,21 @@ set_target_properties(virtual-overlay PROPERTIES
     VS_DPI_AWARE "PerMonitor"
 )
 
-# Use our custom manifest
+# Use our custom manifest. VO_UIACCESS=ON marks the EXE uiAccess="true" so the
+# teleprompter mirror can cover the Start menu; such an EXE only launches when
+# signed and installed under Program Files (build.ps1 enables it for signed builds).
+option(VO_UIACCESS "Build with uiAccess=true (requires signed EXE in Program Files)" OFF)
+if(VO_UIACCESS)
+    set(VO_UIACCESS_VALUE "true")
+else()
+    set(VO_UIACCESS_VALUE "false")
+endif()
+configure_file(res/app.manifest ${CMAKE_BINARY_DIR}/app.manifest @ONLY)
 if(MSVC)
-    target_sources(virtual-overlay PRIVATE res/app.manifest)
+    target_sources(virtual-overlay PRIVATE ${CMAKE_BINARY_DIR}/app.manifest)
+    # Our manifest carries the UAC settings; the linker's default snippet would
+    # conflict when uiAccess is true.
+    target_link_options(virtual-overlay PRIVATE /MANIFESTUAC:NO)
 endif()
 
 # Windows version targeting (Windows 10 1803+)

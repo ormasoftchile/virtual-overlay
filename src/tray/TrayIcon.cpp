@@ -1,5 +1,6 @@
 #include "TrayIcon.h"
 #include "../utils/Logger.h"
+#include "../utils/Monitor.h"
 #include "../config/Defaults.h"
 #include <shlobj.h>
 
@@ -36,17 +37,25 @@ bool TrayIcon::Init(HINSTANCE hInstance, HWND hParentWnd) {
     m_hInstance = hInstance;
     m_hParentWnd = hParentWnd;
 
+    // Allow messages across UIPI in case running elevated
+    static const UINT s_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    ChangeWindowMessageFilterEx(hParentWnd, WM_TRAYICON, MSGFLT_ALLOW, nullptr);
+    ChangeWindowMessageFilterEx(hParentWnd, s_wmTaskbarCreated, MSGFLT_ALLOW, nullptr);
+
     // Initialize NOTIFYICONDATA
     m_nid = {};
     m_nid.cbSize = sizeof(m_nid);
     m_nid.hWnd = hParentWnd;
     m_nid.uID = 1;
-    m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+    m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     m_nid.uCallbackMessage = WM_TRAYICON;
     m_nid.uVersion = NOTIFYICON_VERSION_4;
 
-    // Load icon
-    m_nid.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+    // Load small icon sized for the notification area (16x16 / DPI-scaled)
+    m_nid.hIcon = static_cast<HICON>(LoadImageW(
+        hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+        LR_DEFAULTCOLOR));
     if (!m_nid.hIcon) {
         // Fallback to default application icon
         m_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
@@ -56,23 +65,7 @@ bool TrayIcon::Init(HINSTANCE hInstance, HWND hParentWnd) {
     wcscpy_s(m_nid.szTip, L"Virtual Overlay");
 
     // Create context menu
-    m_hMenu = CreatePopupMenu();
-    if (m_hMenu) {
-        AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_SETTINGS, L"&Settings...");
-        AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
-        
-        // Auto-start item with check
-        UINT autoStartFlags = MF_STRING;
-        if (IsAutoStartEnabled()) {
-            autoStartFlags |= MF_CHECKED;
-        }
-        AppendMenuW(m_hMenu, autoStartFlags, IDM_TRAY_AUTOSTART, L"Start with &Windows");
-        
-        AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_ABOUT, L"&About...");
-        AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_EXIT, L"E&xit");
-    }
+    BuildContextMenu();
 
     m_initialized = true;
     LOG_INFO("TrayIcon initialized");
@@ -99,6 +92,98 @@ void TrayIcon::Shutdown() {
     LOG_INFO("TrayIcon shutdown");
 }
 
+void TrayIcon::BuildContextMenu() {
+    if (m_hMenu) {
+        DestroyMenu(m_hMenu);
+        m_hMenu = nullptr;
+    }
+
+    m_hMenu = CreatePopupMenu();
+    if (!m_hMenu) {
+        return;
+    }
+
+    AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_SETTINGS, L"&Settings...");
+    AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
+
+    // Refresh monitors so newly attached/detached displays are current
+    Monitor::Instance().Refresh();
+
+    // "Flip screen" submenu listing each monitor (teleprompter mirror).
+    const auto& monitors = Monitor::Instance().GetMonitors();
+    if (!monitors.empty()) {
+        HMENU hFlipMenu = CreatePopupMenu();
+        if (hFlipMenu) {
+            for (size_t i = 0; i < monitors.size() && i < IDM_TRAY_FLIP_MAX; ++i) {
+                const auto& mon = monitors[i];
+                std::wstring label = mon.GetDisplayName(i);
+
+                UINT flags = MF_STRING;
+                if (m_isFlipped && m_isFlipped(mon.GetId())) {
+                    flags |= MF_CHECKED;
+                }
+
+                AppendMenuW(hFlipMenu, flags,
+                            IDM_TRAY_FLIP_BASE + static_cast<UINT>(i), label.c_str());
+            }
+            AppendMenuW(m_hMenu, MF_POPUP,
+                        reinterpret_cast<UINT_PTR>(hFlipMenu),
+                        L"&Flip screen (teleprompter)");
+        }
+    }
+
+    AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
+
+    UINT autoStartFlags = MF_STRING;
+    if (IsAutoStartEnabled()) {
+        autoStartFlags |= MF_CHECKED;
+    }
+    AppendMenuW(m_hMenu, autoStartFlags, IDM_TRAY_AUTOSTART, L"Start with &Windows");
+
+    AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_ABOUT, L"&About...");
+    AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_EXIT, L"E&xit");
+}
+
+// In Windows 11, taskbar icons can be hidden in an overflow menu or completely suppressed
+// if "Hidden icon menu" is off. Marking IsPromoted = 1 ensures Windows 11 pins the icon
+// directly onto the visible taskbar next to the clock.
+static void PromoteInNotifyIconSettings() {
+    wchar_t currentExe[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, currentExe, MAX_PATH);
+
+    HKEY hRoot = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\NotifyIconSettings", 0, KEY_READ, &hRoot) != ERROR_SUCCESS) {
+        return;
+    }
+
+    wchar_t subKeyName[256];
+    DWORD index = 0;
+    DWORD subKeyNameLen = 256;
+
+    while (RegEnumKeyExW(hRoot, index, subKeyName, &subKeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+        HKEY hSub = nullptr;
+        if (RegOpenKeyExW(hRoot, subKeyName, 0, KEY_READ | KEY_WRITE, &hSub) == ERROR_SUCCESS) {
+            wchar_t exePath[MAX_PATH] = {};
+            DWORD exePathSize = sizeof(exePath);
+            DWORD type = 0;
+            if (RegQueryValueExW(hSub, L"ExecutablePath", nullptr, &type, reinterpret_cast<LPBYTE>(exePath), &exePathSize) == ERROR_SUCCESS) {
+                if (_wcsicmp(exePath, currentExe) == 0) {
+                    DWORD isPromoted = 1;
+                    RegSetValueExW(hSub, L"IsPromoted", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&isPromoted), sizeof(isPromoted));
+                    RegCloseKey(hSub);
+                    break;
+                }
+            }
+            RegCloseKey(hSub);
+        }
+        index++;
+        subKeyNameLen = 256;
+    }
+    RegCloseKey(hRoot);
+}
+
 bool TrayIcon::AddIcon() {
     if (!Shell_NotifyIconW(NIM_ADD, &m_nid)) {
         DWORD err = GetLastError();
@@ -107,6 +192,7 @@ bool TrayIcon::AddIcon() {
         if (m_addRetryCount < MAX_TRAY_RETRIES) {
             SetTimer(m_hParentWnd, TIMER_TRAY_RETRY, TRAY_RETRY_INTERVAL_MS, nullptr);
         } else {
+            KillTimer(m_hParentWnd, TIMER_TRAY_RETRY);
             LOG_ERROR("Tray icon failed after %d retries — giving up", MAX_TRAY_RETRIES);
         }
         return false;
@@ -115,9 +201,13 @@ bool TrayIcon::AddIcon() {
     KillTimer(m_hParentWnd, TIMER_TRAY_RETRY);
     m_addRetryCount = 0;
 
+    m_nid.uVersion = NOTIFYICON_VERSION_4;
     if (!Shell_NotifyIconW(NIM_SETVERSION, &m_nid)) {
         LOG_WARN("Failed to set tray icon version: %lu", GetLastError());
     }
+
+    // Ensure Windows 11 promotes icon to visible taskbar
+    PromoteInNotifyIconSettings();
 
     m_visible = true;
     LOG_INFO("Tray icon added successfully");
@@ -182,15 +272,12 @@ void TrayIcon::HandleMessage(WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_LBUTTONDBLCLK:
-            // Double-click opens settings
+        case NIN_SELECT:
+        case NIN_KEYSELECT:
+            // Left click, Enter key, or double-click opens settings
             if (m_onSettings) {
                 m_onSettings();
             }
-            break;
-
-        case NIN_SELECT:
-        case NIN_KEYSELECT:
-            // Single click/keyboard - could show a popup or do nothing
             break;
 
         default:
@@ -199,13 +286,11 @@ void TrayIcon::HandleMessage(WPARAM wParam, LPARAM lParam) {
 }
 
 void TrayIcon::ShowContextMenu() {
+    // Rebuild so the monitor list and flip check states are current.
+    BuildContextMenu();
     if (!m_hMenu) {
         return;
     }
-
-    // Update auto-start check state
-    CheckMenuItem(m_hMenu, IDM_TRAY_AUTOSTART, 
-                  IsAutoStartEnabled() ? MF_CHECKED : MF_UNCHECKED);
 
     // Get cursor position
     POINT pt;
@@ -249,6 +334,13 @@ void TrayIcon::ShowContextMenu() {
             break;
 
         default:
+            if (cmd >= IDM_TRAY_FLIP_BASE && cmd < IDM_TRAY_FLIP_BASE + IDM_TRAY_FLIP_MAX) {
+                const auto& monitors = Monitor::Instance().GetMonitors();
+                const size_t index = cmd - IDM_TRAY_FLIP_BASE;
+                if (index < monitors.size() && m_onFlipToggle) {
+                    m_onFlipToggle(monitors[index].GetId());
+                }
+            }
             break;
     }
 

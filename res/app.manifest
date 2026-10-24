@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-    version="1.0.1.0"
+    version="1.1.0.0"
     processorArchitecture="amd64"
     name="VirtualOverlay"
     type="win32"
@@ -40,11 +40,14 @@
     </dependentAssembly>
   </dependency>
   
-  <!-- Request execution level: asInvoker (no elevation) -->
+  <!-- Request execution level: asInvoker (no elevation).
+       uiAccess is set at configure time (CMake option VO_UIACCESS): it lets the
+       teleprompter mirror sit above the Start menu / Task View, but Windows only
+       launches such an EXE when it is signed and installed in Program Files. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+        <requestedExecutionLevel level="asInvoker" uiAccess="@VO_UIACCESS_VALUE@"/>
       </requestedPrivileges>
     </security>
   </trustInfo>

@@ -1,9 +1,126 @@
 #include "Monitor.h"
 #include <shellscalingapi.h>
+#include <algorithm>
+#include <unordered_map>
 
 #pragma comment(lib, "shcore.lib")
 
 namespace VirtualOverlay {
+
+std::wstring MonitorInfo::GetId() const {
+    if (!friendlyName.empty()) {
+        return friendlyName;
+    }
+    if (!devicePath.empty()) {
+        return devicePath;
+    }
+    return name;
+}
+
+bool MonitorInfo::MatchesId(const std::wstring& id) const {
+    if (id.empty()) {
+        return false;
+    }
+    if (!friendlyName.empty() && _wcsicmp(friendlyName.c_str(), id.c_str()) == 0) {
+        return true;
+    }
+    if (!devicePath.empty() && _wcsicmp(devicePath.c_str(), id.c_str()) == 0) {
+        return true;
+    }
+    if (!name.empty() && _wcsicmp(name.c_str(), id.c_str()) == 0) {
+        return true;
+    }
+    return false;
+}
+
+std::wstring MonitorInfo::GetDisplayName(size_t /*index*/) const {
+    std::wstring label;
+    if (!friendlyName.empty()) {
+        label = friendlyName + L" (";
+    } else {
+        label = name + L" (";
+    }
+    label += std::to_wstring(bounds.right - bounds.left) + L"x" +
+             std::to_wstring(bounds.bottom - bounds.top);
+    if (isPrimary) {
+        label += L", Primary";
+    }
+    label += L")";
+    return label;
+}
+
+struct DisplayTargetInfo {
+    std::wstring friendlyName;
+    std::wstring devicePath;
+};
+
+static std::unordered_map<std::wstring, DisplayTargetInfo> GetDisplayTargets() {
+    std::unordered_map<std::wstring, DisplayTargetInfo> targets;
+
+    UINT32 numPathArrayElements = 0;
+    UINT32 numModeInfoArrayElements = 0;
+    LONG status = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPathArrayElements, &numModeInfoArrayElements);
+    if (status != ERROR_SUCCESS || numPathArrayElements == 0) {
+        return targets;
+    }
+
+    std::vector<DISPLAYCONFIG_PATH_INFO> pathInfos(numPathArrayElements);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modeInfos(numModeInfoArrayElements);
+    status = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &numPathArrayElements, pathInfos.data(),
+                                &numModeInfoArrayElements, modeInfos.data(), nullptr);
+    if (status != ERROR_SUCCESS) {
+        return targets;
+    }
+    pathInfos.resize(numPathArrayElements);
+
+    for (const auto& path : pathInfos) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {};
+        sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        sourceName.header.size = sizeof(sourceName);
+        sourceName.header.adapterId = path.sourceInfo.adapterId;
+        sourceName.header.id = path.sourceInfo.id;
+        if (DisplayConfigGetDeviceInfo(&sourceName.header) != ERROR_SUCCESS) {
+            continue;
+        }
+
+        DISPLAYCONFIG_TARGET_DEVICE_NAME targetName = {};
+        targetName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+        targetName.header.size = sizeof(targetName);
+        targetName.header.adapterId = path.targetInfo.adapterId;
+        targetName.header.id = path.targetInfo.id;
+        if (DisplayConfigGetDeviceInfo(&targetName.header) != ERROR_SUCCESS) {
+            continue;
+        }
+
+        DisplayTargetInfo info;
+        if (targetName.monitorFriendlyDeviceName[0] != L'\0') {
+            info.friendlyName = targetName.monitorFriendlyDeviceName;
+        }
+        if (targetName.monitorDevicePath[0] != L'\0') {
+            info.devicePath = targetName.monitorDevicePath;
+        }
+        targets[sourceName.viewGdiDeviceName] = std::move(info);
+    }
+    return targets;
+}
+
+static std::wstring GetFallbackDeviceString(const std::wstring& gdiName) {
+    DISPLAY_DEVICEW ddMon = {};
+    ddMon.cb = sizeof(ddMon);
+    if (EnumDisplayDevicesW(gdiName.c_str(), 0, &ddMon, 0)) {
+        if (ddMon.DeviceString[0] != L'\0' &&
+            _wcsicmp(ddMon.DeviceString, L"Generic PnP Monitor") != 0 &&
+            _wcsicmp(ddMon.DeviceString, L"Generic Non-PnP Monitor") != 0) {
+            return ddMon.DeviceString;
+        }
+    }
+    return L"";
+}
+
+struct MonitorEnumContext {
+    Monitor* monitor;
+    const std::unordered_map<std::wstring, DisplayTargetInfo>* targets;
+};
 
 Monitor& Monitor::Instance() {
     static Monitor instance;
@@ -16,13 +133,21 @@ Monitor::Monitor() {
 
 void Monitor::Refresh() {
     m_monitors.clear();
+    auto targets = GetDisplayTargets();
+    MonitorEnumContext ctx = { this, &targets };
     EnumDisplayMonitors(nullptr, nullptr, EnumMonitorsCallback, 
-                        reinterpret_cast<LPARAM>(this));
+                        reinterpret_cast<LPARAM>(&ctx));
+
+    // Ensure primary monitor is always first
+    std::stable_sort(m_monitors.begin(), m_monitors.end(), [](const MonitorInfo& a, const MonitorInfo& b) {
+        return a.isPrimary > b.isPrimary;
+    });
 }
 
 BOOL CALLBACK Monitor::EnumMonitorsCallback(HMONITOR hMonitor, HDC /*hdcMonitor*/,
                                              LPRECT /*lprcMonitor*/, LPARAM dwData) {
-    Monitor* self = reinterpret_cast<Monitor*>(dwData);
+    auto* ctx = reinterpret_cast<MonitorEnumContext*>(dwData);
+    Monitor* self = ctx->monitor;
     
     MONITORINFOEXW mi = {};
     mi.cbSize = sizeof(mi);
@@ -37,6 +162,15 @@ BOOL CALLBACK Monitor::EnumMonitorsCallback(HMONITOR hMonitor, HDC /*hdcMonitor*
     info.isPrimary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
     info.name = mi.szDevice;
     info.dpi = GetMonitorDpi(hMonitor);
+
+    auto it = ctx->targets->find(info.name);
+    if (it != ctx->targets->end()) {
+        info.friendlyName = it->second.friendlyName;
+        info.devicePath = it->second.devicePath;
+    }
+    if (info.friendlyName.empty()) {
+        info.friendlyName = GetFallbackDeviceString(info.name);
+    }
 
     self->m_monitors.push_back(info);
     return TRUE;
@@ -65,6 +199,11 @@ const MonitorInfo* Monitor::GetAtCursor() const {
 }
 
 const MonitorInfo* Monitor::GetAtPoint(POINT pt) const {
+    for (const auto& mon : m_monitors) {
+        if (PtInRect(&mon.bounds, pt)) {
+            return &mon;
+        }
+    }
     HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     return GetByHandle(hMon);
 }
@@ -72,6 +211,28 @@ const MonitorInfo* Monitor::GetAtPoint(POINT pt) const {
 const MonitorInfo* Monitor::GetByHandle(HMONITOR handle) const {
     for (const auto& mon : m_monitors) {
         if (mon.handle == handle) {
+            return &mon;
+        }
+    }
+    return nullptr;
+}
+
+const MonitorInfo* Monitor::GetByName(const std::wstring& name) const {
+    if (name.empty()) {
+        return nullptr;
+    }
+    // 1. Match by EDID friendly name (e.g. "MNN") or hardware device path first
+    for (const auto& mon : m_monitors) {
+        if (!mon.friendlyName.empty() && _wcsicmp(mon.friendlyName.c_str(), name.c_str()) == 0) {
+            return &mon;
+        }
+        if (!mon.devicePath.empty() && _wcsicmp(mon.devicePath.c_str(), name.c_str()) == 0) {
+            return &mon;
+        }
+    }
+    // 2. Fallback: match by GDI device name (e.g. "\\.\DISPLAY1")
+    for (const auto& mon : m_monitors) {
+        if (_wcsicmp(mon.name.c_str(), name.c_str()) == 0) {
             return &mon;
         }
     }

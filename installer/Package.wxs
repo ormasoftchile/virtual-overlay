@@ -2,9 +2,9 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
     <Package Name="Virtual Overlay"
              Manufacturer="Virtual Overlay"
-             Version="1.0.1.0"
+             Version="1.1.0.0"
              UpgradeCode="F8E3B5A1-7C2D-4E9F-B6A8-3D1C5E7F9A2B"
-             Scope="perUser">
+             Scope="perMachine">
 
         <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
                       AllowSameVersionUpgrades="yes" />
@@ -13,7 +13,7 @@
                                Id="CloseVO"
                                Target="virtual-overlay.exe"
                                CloseMessage="yes"
-                               ElevatedCloseMessage="no"
+                               ElevatedCloseMessage="yes"
                                TerminateProcess="500"
                                RebootPrompt="no" />
 
@@ -23,9 +23,11 @@
         <Property Id="ARPPRODUCTICON" Value="AppIcon" />
         <Property Id="ARPNOMODIFY" Value="1" />
 
-        <StandardDirectory Id="LocalAppDataFolder">
+        <!-- Per-machine under Program Files: required for the uiAccess EXE
+             (teleprompter mirror above the Start menu / Task View). -->
+        <StandardDirectory Id="ProgramFiles64Folder">
             <Directory Id="INSTALLFOLDER" Name="VirtualOverlay">
-                <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+                <Component Id="MainExecutable" Guid="EA0F230B-AD57-44D8-9E3A-F05D8A0AD277" Bitness="always64">
                     <File Id="VirtualOverlayExe" Source="..\build\Release\virtual-overlay.exe" KeyPath="yes">
                         <Shortcut Id="StartMenuShortcut"
                                   Name="Virtual Overlay"
@@ -34,14 +36,17 @@
                                   Icon="AppIcon"
                                   Advertise="yes" />
                     </File>
-                    
-                    <!-- Startup registry entry (optional - controlled by app settings) -->
+                </Component>
+
+                <!-- Startup registry entry for the installing user (the app's
+                     "start with Windows" setting manages the same HKCU value). -->
+                <Component Id="AutoStart" Guid="5404BA2C-0AF9-4B52-B45F-755D6DA263E6">
                     <RegistryValue Root="HKCU"
                                    Key="Software\Microsoft\Windows\CurrentVersion\Run"
                                    Name="VirtualOverlay"
                                    Type="string"
                                    Value="&quot;[INSTALLFOLDER]virtual-overlay.exe&quot;"
-                                   KeyPath="no" />
+                                   KeyPath="yes" />
                 </Component>
             </Directory>
         </StandardDirectory>
@@ -56,11 +61,14 @@
 
         <Feature Id="MainFeature" Title="Virtual Overlay" Level="1">
             <ComponentRef Id="MainExecutable" />
+            <ComponentRef Id="AutoStart" />
         </Feature>
 
-        <InstallExecuteSequence>
-            <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT Installed" />
-        </InstallExecuteSequence>
+        <!-- Launch from the (non-elevated) UI sequence so the app does not run
+             with the installer's elevated token. -->
+        <InstallUISequence>
+            <Custom Action="LaunchApp" After="ExecuteAction" Condition="NOT Installed" />
+        </InstallUISequence>
 
     </Package>
 </Wix>

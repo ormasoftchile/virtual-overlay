@@ -12,7 +12,18 @@ struct MonitorInfo {
     RECT workArea;
     bool isPrimary;
     std::wstring name;
+    std::wstring friendlyName;
+    std::wstring devicePath;
     UINT dpi;
+
+    // Stable identifier for config persistence (prefers EDID friendlyName like "MNN",
+    // falling back to devicePath or GDI device name).
+    std::wstring GetId() const;
+
+    // Returns true if id matches friendlyName, devicePath, or GDI device name.
+    bool MatchesId(const std::wstring& id) const;
+
+    std::wstring GetDisplayName(size_t index) const;
 };
 
 class Monitor {
@@ -39,6 +50,9 @@ public:
 
     // Get monitor by handle
     const MonitorInfo* GetByHandle(HMONITOR handle) const;
+
+    // Get monitor by friendly name (e.g. "MNN"), hardware device path, or GDI name
+    const MonitorInfo* GetByName(const std::wstring& name) const;
 
     // Get monitor rect for a given handle
     RECT GetMonitorRect(HMONITOR handle) const;
