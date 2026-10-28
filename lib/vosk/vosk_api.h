@@ -1,6 +1,10 @@
 /*
  * Copyright 2020-2021 Alpha Cephei Inc.
  *
+ * Modified by Virtual Overlay: reduced to the C API declarations used by this
+ * project, with pragma once replacing the upstream include guard.
+ * Based on https://github.com/alphacep/vosk-api/blob/v0.3.45/src/vosk_api.h
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at

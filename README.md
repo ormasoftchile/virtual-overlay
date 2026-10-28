@@ -27,7 +27,10 @@ Download the latest `VirtualOverlay.msi` from [Releases](https://github.com/orma
 - Upgrading from 1.0.1 or earlier (per-user install): uninstall the old version first
 
 ### Portable
-Download `virtual-overlay.exe` and run directly.
+Keep `virtual-overlay.exe`, all four bundled Vosk DLLs, and the license/notice
+files together in the same folder. Copying only the EXE will leave Presenter's
+speech recognition unavailable. Use an unsigned build for portable use; signed
+UIAccess builds must be installed in Program Files using the MSI.
 
 ## Usage
 
@@ -55,9 +58,12 @@ Settings are stored in:
 ## Building from Source
 
 ### Requirements
-- Visual Studio 2022 with C++ Desktop Development
+- Visual Studio 2022 or newer with C++ Desktop Development (C++20 support)
 - CMake 3.20+
 - WiX Toolset v4+ (for MSI installer)
+
+CI builds use the `windows-2022` runner to match the Visual Studio 2022
+generator; `windows-latest` may move to a newer Visual Studio version.
 
 ### Build Steps
 
@@ -69,6 +75,9 @@ cd virtual-overlay
 # Build everything (EXE + MSI), no signing
 .\build.ps1 -SkipSign
 
+# Build and sign everything (unlock signing in SimplySign Desktop first)
+.\build.ps1
+
 # Or manually:
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
@@ -78,6 +87,46 @@ dotnet tool install --global wix
 cd installer
 wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 ```
+
+Signed builds require the Windows SDK's `signtool` and access to the private key
+of the Certum certificate configured in [build.ps1](build.ps1). Sign in to
+SimplySign Desktop and unlock signing before running the build. If SignTool
+reports "No certificates were found that met all the given criteria" despite
+the certificate being installed and valid, reconnect/unlock SimplySign Desktop
+to restore private-key access, then retry.
+
+### Presenter speech runtime and models
+
+CMake downloads the pinned Vosk 0.3.45 x64 runtime, verifies its SHA-256 checksum,
+and copies these DLLs beside both executables in the selected build configuration:
+
+- `libvosk.dll`
+- `libgcc_s_seh-1.dll`
+- `libstdc++-6.dll`
+- `libwinpthread-1.dll`
+
+The MSI includes all four DLLs and their license/notice files. The first
+configuration needs internet access; later builds reuse the downloaded runtime.
+If an older installation reports a missing Vosk runtime, rebuild and reinstall
+the updated MSI rather than copying only `libvosk.dll`.
+
+Attribution and component-specific terms are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). All Vosk dependency licenses and
+[source-access information](lib/vosk/SOURCES.vosk.txt) are deployed with the
+runtime and installed by the MSI. Releases must also publish `SOURCES.vosk.txt`
+next to the installer/portable download so source is accessible before installation.
+`build.ps1` copies it to `installer\SOURCES.vosk.txt` beside the MSI.
+
+Speech models are separate from the runtime. Download the default English model
+into `%LOCALAPPDATA%\VirtualOverlay\models` with:
+
+```powershell
+.\scripts\Get-VoskModel.ps1
+```
+
+The default model is Apache-2.0; other models may have different licenses.
+Check the [official model catalogue](https://alphacephei.com/vosk/models) and
+retain the selected model's notices before redistributing it.
 
 ### Project Structure
 

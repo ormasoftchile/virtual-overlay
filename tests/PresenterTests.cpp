@@ -386,6 +386,35 @@ static void TestAudioDeviceEnumerationAndMissingDeviceHandling() {
     AudioInputManager::Instance().SetSelectedDevice(L"default", L"", 0);
 }
 
+static void TestBundledVoskRuntime() {
+    wchar_t exePath[MAX_PATH] = {};
+    EXPECT_TRUE(GetModuleFileNameW(nullptr, exePath, MAX_PATH) != 0, "executable path available");
+    fs::path exeDir = fs::path(exePath).parent_path();
+
+    for (const wchar_t* name : {
+             L"libvosk.dll", L"libgcc_s_seh-1.dll", L"libstdc++-6.dll", L"libwinpthread-1.dll" }) {
+        EXPECT_TRUE(fs::is_regular_file(exeDir / name), "Vosk runtime DLL deployed beside executable");
+    }
+
+    HMODULE module = LoadLibraryExW((exeDir / L"libvosk.dll").c_str(), nullptr,
+                                  LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    EXPECT_TRUE(module != nullptr, "bundled Vosk runtime loads with its dependencies");
+
+    for (const char* symbol : {
+             "vosk_set_log_level", "vosk_model_new", "vosk_model_free",
+             "vosk_recognizer_new", "vosk_recognizer_new_grm", "vosk_recognizer_free",
+             "vosk_recognizer_set_words", "vosk_recognizer_set_partial_words",
+             "vosk_recognizer_accept_waveform_s", "vosk_recognizer_result",
+             "vosk_recognizer_partial_result", "vosk_recognizer_final_result",
+             "vosk_recognizer_reset" }) {
+        if (!GetProcAddress(module, symbol)) {
+            FreeLibrary(module);
+            EXPECT_TRUE(false, symbol);
+        }
+    }
+    FreeLibrary(module);
+}
+
 static void TestVoskGrammarAndModelValidation() {
     std::string grm = OfflineSpeechRecognizer::BuildGrammarJson({ "hello", "world", "hello", "größe" });
     EXPECT_TRUE(!grm.empty(), "grammar built for small vocabulary");
@@ -611,11 +640,18 @@ static void TestVoskDllAndPresenterControllerLifecycle() {
     ctrl.Shutdown();
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     std::printf("=== Virtual Overlay Presenter Test Suite ===\n");
+
+    RunTest("Bundled Vosk runtime and required exports", TestBundledVoskRuntime);
+    if (argc == 2 && std::string(argv[1]) == "--vosk-runtime-only") {
+        std::printf("Passed: %d | Failed: %d\n", g_passed, g_failed);
+        CoUninitialize();
+        return (g_failed == 0) ? 0 : 1;
+    }
 
     RunTest("NumberExpander cardinal expansion", TestNumberExpander);
     RunTest("TextNormalizer punctuation, numbers, and spans", TestTextNormalizer);

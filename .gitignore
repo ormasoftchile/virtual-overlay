@@ -65,6 +65,7 @@ Desktop.ini
 *.msi
 *.wixobj
 *.wixpdb
+installer/SOURCES.vosk.txt
 
 # Test artifacts
 *.dmp

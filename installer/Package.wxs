@@ -38,6 +38,34 @@
                     </File>
                 </Component>
 
+                <Component Id="VoskRuntime" Guid="*" Bitness="always64">
+                    <File Id="VoskDll" Source="..\build\Release\libvosk.dll" KeyPath="yes" />
+                </Component>
+                <Component Id="VoskGccRuntime" Guid="*" Bitness="always64">
+                    <File Id="VoskGccDll" Source="..\build\Release\libgcc_s_seh-1.dll" KeyPath="yes" />
+                </Component>
+                <Component Id="VoskCppRuntime" Guid="*" Bitness="always64">
+                    <File Id="VoskCppDll" Source="..\build\Release\libstdc++-6.dll" KeyPath="yes" />
+                </Component>
+                <Component Id="VoskThreadRuntime" Guid="*" Bitness="always64">
+                    <File Id="VoskThreadDll" Source="..\build\Release\libwinpthread-1.dll" KeyPath="yes" />
+                </Component>
+                <Component Id="RuntimeNotices" Guid="E0CAB69A-7624-4D26-A12E-843C94CE83B9" Bitness="always64">
+                    <File Id="ThirdPartyNotices" Source="..\build\Release\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
+                    <File Id="VoskLicense" Source="..\build\Release\LICENSE.vosk.txt" />
+                    <File Id="GccLicense" Source="..\build\Release\LICENSE.gcc.txt" />
+                    <File Id="GccRuntimeLicense" Source="..\build\Release\LICENSE.gcc-runtime.txt" />
+                    <File Id="WinpthreadsLicense" Source="..\build\Release\LICENSE.winpthreads.txt" />
+                    <File Id="KaldiLicense" Source="..\build\Release\LICENSE.kaldi.txt" />
+                    <File Id="OpenFstLicense" Source="..\build\Release\LICENSE.openfst.txt" />
+                    <File Id="OpenBlasLicense" Source="..\build\Release\LICENSE.openblas.txt" />
+                    <File Id="GotoBlasLicense" Source="..\build\Release\LICENSE.gotoblas.txt" />
+                    <File Id="ClapackLicense" Source="..\build\Release\LICENSE.clapack.txt" />
+                    <File Id="F2cLicense" Source="..\build\Release\LICENSE.f2c.txt" />
+                    <File Id="MingwRuntimeLicense" Source="..\build\Release\LICENSE.mingw-runtime.txt" />
+                    <File Id="VoskSources" Source="..\build\Release\SOURCES.vosk.txt" />
+                </Component>
+
                 <!-- Startup registry entry for the installing user (the app's
                      "start with Windows" setting manages the same HKCU value). -->
                 <Component Id="AutoStart" Guid="5404BA2C-0AF9-4B52-B45F-755D6DA263E6">
@@ -61,6 +89,11 @@
 
         <Feature Id="MainFeature" Title="Virtual Overlay" Level="1">
             <ComponentRef Id="MainExecutable" />
+            <ComponentRef Id="VoskRuntime" />
+            <ComponentRef Id="VoskGccRuntime" />
+            <ComponentRef Id="VoskCppRuntime" />
+            <ComponentRef Id="VoskThreadRuntime" />
+            <ComponentRef Id="RuntimeNotices" />
             <ComponentRef Id="AutoStart" />
         </Feature>
 
