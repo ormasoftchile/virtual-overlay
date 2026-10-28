@@ -41,6 +41,25 @@ constexpr int IDC_FLIP_CURSOR_MODE = 403;
 constexpr int IDC_FLIP_MONITOR_BASE = 410;
 constexpr int IDC_FLIP_MONITOR_MAX = 32;
 
+constexpr int IDC_PRES_ENABLE = 600;
+constexpr int IDC_PRES_MIC_COMBO = 601;
+constexpr int IDC_PRES_CHANNEL_COMBO = 602;
+constexpr int IDC_PRES_FONT_SIZE = 603;
+constexpr int IDC_PRES_FONT_SIZE_LABEL = 604;
+constexpr int IDC_PRES_WIDTH = 605;
+constexpr int IDC_PRES_WIDTH_LABEL = 606;
+constexpr int IDC_PRES_BG_OPACITY = 607;
+constexpr int IDC_PRES_BG_OPACITY_LABEL = 608;
+constexpr int IDC_PRES_SHOW_BG = 609;
+constexpr int IDC_PRES_LINES_COMBO = 610;
+constexpr int IDC_PRES_HOTKEY = 611;
+constexpr int IDC_PRES_MODEL_STATUS = 612;
+constexpr int IDC_PRES_BROWSE_MODEL = 613;
+constexpr int IDC_PRES_DOWNLOAD_MODEL = 614;
+constexpr int IDC_PRES_PASTE_SCRIPT = 615;
+constexpr int IDC_PRES_LOAD_FILE = 616;
+constexpr int IDC_PRES_RESET_POS = 617;
+
 constexpr int IDC_ABOUT_VERSION = 500;
 constexpr int IDC_ABOUT_GITHUB = 501;
 constexpr int IDC_ABOUT_AUTHOR = 502;
@@ -50,21 +69,20 @@ public:
     static HWND CreateGeneralPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
     static HWND CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
     static HWND CreateFlipPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
+    static HWND CreatePresenterPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
     static HWND CreateAboutPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
 
     static void LoadGeneralSettings(HWND hPage, const GeneralConfig& config);
     static void LoadOverlaySettings(HWND hPage, const OverlayConfig& config);
     static void LoadFlipSettings(HWND hPage, const FlipConfig& config);
+    static void LoadPresenterSettings(HWND hPage, const PresenterConfig& config);
 
     static void SaveGeneralSettings(HWND hPage, GeneralConfig& config);
     static void SaveOverlaySettings(HWND hPage, OverlayConfig& config);
     static void SaveFlipSettings(HWND hPage, FlipConfig& config);
+    static void SavePresenterSettings(HWND hPage, PresenterConfig& config);
 
 private:
-    static LRESULT CALLBACK GeneralPageProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    static LRESULT CALLBACK OverlayPageProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    static LRESULT CALLBACK AboutPageProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
     static HWND CreateLabel(HWND hParent, HINSTANCE hInstance, int id, const wchar_t* text, int x, int y, int w, int h);
     static HWND CreateCheckbox(HWND hParent, HINSTANCE hInstance, int id, const wchar_t* text, int x, int y, int w, int h);
     static HWND CreateComboBox(HWND hParent, HINSTANCE hInstance, int id, int x, int y, int w, int h);

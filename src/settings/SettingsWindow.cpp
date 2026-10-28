@@ -151,7 +151,7 @@ bool SettingsWindow::CreateTabControl() {
         rcClient.right - 2 * MARGIN,
         TAB_HEIGHT,
         m_hwnd,
-        reinterpret_cast<HMENU>(IDC_TAB_CONTROL),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TAB_CONTROL)),
         m_hInstance,
         nullptr
     );
@@ -177,8 +177,11 @@ bool SettingsWindow::CreateTabControl() {
     tie.pszText = const_cast<LPWSTR>(L"Flip Screen");
     TabCtrl_InsertItem(m_hTabControl, 2, &tie);
 
-    tie.pszText = const_cast<LPWSTR>(L"About");
+    tie.pszText = const_cast<LPWSTR>(L"Presenter");
     TabCtrl_InsertItem(m_hTabControl, 3, &tie);
+
+    tie.pszText = const_cast<LPWSTR>(L"About");
+    TabCtrl_InsertItem(m_hTabControl, 4, &tie);
 
     return true;
 }
@@ -195,19 +198,14 @@ bool SettingsWindow::CreatePages() {
     GetClientRect(m_hwnd, &rcClient);
     rcTab.bottom = rcClient.bottom - BUTTON_HEIGHT - MARGIN * 2;
 
-    LOG_DEBUG("Page rect: left=%d, top=%d, right=%d, bottom=%d",
-              rcTab.left, rcTab.top, rcTab.right, rcTab.bottom);
-
     // Create page windows
     m_hPageGeneral = SettingsPages::CreateGeneralPage(m_hwnd, m_hInstance, rcTab);
     m_hPageOverlay = SettingsPages::CreateOverlayPage(m_hwnd, m_hInstance, rcTab);
     m_hPageFlip = SettingsPages::CreateFlipPage(m_hwnd, m_hInstance, rcTab);
+    m_hPagePresenter = SettingsPages::CreatePresenterPage(m_hwnd, m_hInstance, rcTab);
     m_hPageAbout = SettingsPages::CreateAboutPage(m_hwnd, m_hInstance, rcTab);
 
-    LOG_DEBUG("Pages created: General=%p, Overlay=%p, Flip=%p, About=%p",
-              (void*)m_hPageGeneral, (void*)m_hPageOverlay, (void*)m_hPageFlip, (void*)m_hPageAbout);
-
-    return m_hPageGeneral && m_hPageOverlay && m_hPageFlip && m_hPageAbout;
+    return m_hPageGeneral && m_hPageOverlay && m_hPageFlip && m_hPagePresenter && m_hPageAbout;
 }
 
 bool SettingsWindow::CreateButtons() {
@@ -223,7 +221,7 @@ bool SettingsWindow::CreateButtons() {
         0, L"BUTTON", L"Apply",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
         btnX, btnY, BUTTON_WIDTH, BUTTON_HEIGHT,
-        m_hwnd, reinterpret_cast<HMENU>(IDC_BTN_APPLY),
+        m_hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_APPLY)),
         m_hInstance, nullptr
     );
 
@@ -233,7 +231,7 @@ bool SettingsWindow::CreateButtons() {
         0, L"BUTTON", L"Cancel",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
         btnX, btnY, BUTTON_WIDTH, BUTTON_HEIGHT,
-        m_hwnd, reinterpret_cast<HMENU>(IDC_BTN_CANCEL),
+        m_hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_CANCEL)),
         m_hInstance, nullptr
     );
 
@@ -243,7 +241,7 @@ bool SettingsWindow::CreateButtons() {
         0, L"BUTTON", L"OK",
         WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
         btnX, btnY, BUTTON_WIDTH, BUTTON_HEIGHT,
-        m_hwnd, reinterpret_cast<HMENU>(IDC_BTN_OK),
+        m_hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OK)),
         m_hInstance, nullptr
     );
 
@@ -340,6 +338,9 @@ void SettingsWindow::ShowPage(SettingsTab tab) {
         case SettingsTab::Flip:
             hPage = m_hPageFlip;
             break;
+        case SettingsTab::Presenter:
+            hPage = m_hPagePresenter;
+            break;
         case SettingsTab::About:
             hPage = m_hPageAbout;
             break;
@@ -347,7 +348,6 @@ void SettingsWindow::ShowPage(SettingsTab tab) {
 
     if (hPage) {
         ShowWindow(hPage, SW_SHOW);
-        // Bring page to front (above tab control)
         SetWindowPos(hPage, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         InvalidateRect(hPage, nullptr, TRUE);
         UpdateWindow(hPage);
@@ -360,6 +360,7 @@ void SettingsWindow::HideAllPages() {
     if (m_hPageGeneral) ShowWindow(m_hPageGeneral, SW_HIDE);
     if (m_hPageOverlay) ShowWindow(m_hPageOverlay, SW_HIDE);
     if (m_hPageFlip) ShowWindow(m_hPageFlip, SW_HIDE);
+    if (m_hPagePresenter) ShowWindow(m_hPagePresenter, SW_HIDE);
     if (m_hPageAbout) ShowWindow(m_hPageAbout, SW_HIDE);
 }
 
@@ -370,6 +371,12 @@ void SettingsWindow::OnApply() {
         MessageBoxW(m_hwnd, L"Invalid settings. Please check your values.",
                     L"Settings Error", MB_OK | MB_ICONWARNING);
         return;
+    }
+
+    // Preserve monitorAnchors that may have been updated via Alt-drag while Settings was open
+    const auto& liveAnchors = Config::Instance().Get().presenter.monitorAnchors;
+    for (const auto& [k, v] : liveAnchors) {
+        m_workingConfig.presenter.monitorAnchors[k] = v;
     }
 
     // Apply to global config
@@ -397,14 +404,14 @@ void SettingsWindow::LoadSettingsToUI() {
     SettingsPages::LoadGeneralSettings(m_hPageGeneral, m_workingConfig.general);
     SettingsPages::LoadOverlaySettings(m_hPageOverlay, m_workingConfig.overlay);
     SettingsPages::LoadFlipSettings(m_hPageFlip, m_workingConfig.flip);
+    SettingsPages::LoadPresenterSettings(m_hPagePresenter, m_workingConfig.presenter);
 }
 
 void SettingsWindow::SaveSettingsFromUI() {
-    LOG_DEBUG("SaveSettingsFromUI: hPageOverlay=%p", (void*)m_hPageOverlay);
     SettingsPages::SaveGeneralSettings(m_hPageGeneral, m_workingConfig.general);
     SettingsPages::SaveOverlaySettings(m_hPageOverlay, m_workingConfig.overlay);
     SettingsPages::SaveFlipSettings(m_hPageFlip, m_workingConfig.flip);
-    LOG_DEBUG("SaveSettingsFromUI done: overlay.position=%d", static_cast<int>(m_workingConfig.overlay.position));
+    SettingsPages::SavePresenterSettings(m_hPagePresenter, m_workingConfig.presenter);
 }
 
 bool SettingsWindow::ValidateSettings() {
@@ -414,13 +421,7 @@ bool SettingsWindow::ValidateSettings() {
 void SettingsWindow::PreviewOverlay() {
     LOG_INFO("PreviewOverlay called");
     
-    // Temporarily apply overlay settings and show
     const auto& overlayConfig = m_workingConfig.overlay;
-    
-    LOG_INFO("PreviewOverlay: mode=%d, position=%d, enabled=%d",
-             static_cast<int>(overlayConfig.mode),
-             static_cast<int>(overlayConfig.position),
-             overlayConfig.enabled ? 1 : 0);
     
     OverlaySettings previewSettings;
     previewSettings.enabled = true;
@@ -429,21 +430,18 @@ void SettingsWindow::PreviewOverlay() {
     previewSettings.monitor = overlayConfig.monitor;
     previewSettings.format = overlayConfig.format;
     
-    // For preview: notification mode auto-hides, watermark doesn't
     if (overlayConfig.mode == OverlayMode::Notification) {
         previewSettings.autoHide = true;
-        previewSettings.autoHideDelayMs = 3000;  // 3 seconds for preview
+        previewSettings.autoHideDelayMs = 3000;
     } else {
         previewSettings.autoHide = false;
     }
     
-    // Watermark settings
     previewSettings.watermarkFontSize = overlayConfig.watermarkFontSize;
     previewSettings.watermarkOpacity = overlayConfig.watermarkOpacity;
     previewSettings.watermarkShadow = overlayConfig.watermarkShadow;
     previewSettings.watermarkColor = overlayConfig.watermarkColor;
     
-    // Dodge settings
     previewSettings.dodgeOnHover = overlayConfig.dodgeOnHover;
     previewSettings.dodgeProximity = overlayConfig.dodgeProximity;
     

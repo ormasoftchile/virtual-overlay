@@ -13,6 +13,7 @@ enum class SettingsTab {
     General = 0,
     Overlay,
     Flip,
+    Presenter,
     About
 };
 
@@ -73,6 +74,7 @@ private:
     HWND m_hPageGeneral = nullptr;
     HWND m_hPageOverlay = nullptr;
     HWND m_hPageFlip = nullptr;
+    HWND m_hPagePresenter = nullptr;
     HWND m_hPageAbout = nullptr;
 
     SettingsTab m_currentTab = SettingsTab::General;
@@ -86,9 +88,9 @@ constexpr int IDC_BTN_OK = 101;
 constexpr int IDC_BTN_CANCEL = 102;
 constexpr int IDC_BTN_APPLY = 103;
 
-constexpr int SETTINGS_WIDTH = 500;
-constexpr int SETTINGS_HEIGHT = 450;
-constexpr int TAB_HEIGHT = 350;
+constexpr int SETTINGS_WIDTH = 520;
+constexpr int SETTINGS_HEIGHT = 480;
+constexpr int TAB_HEIGHT = 380;
 constexpr int BUTTON_HEIGHT = 30;
 constexpr int BUTTON_WIDTH = 80;
 constexpr int MARGIN = 10;

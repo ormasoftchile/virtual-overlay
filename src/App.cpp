@@ -6,6 +6,7 @@
 #include "overlay/OverlayConfig.h"
 #include "desktop/VirtualDesktop.h"
 #include "display/FlipManager.h"
+#include "presenter/PresenterController.h"
 #include "settings/SettingsWindow.h"
 #include "tray/TrayIcon.h"
 #include <algorithm>
@@ -100,7 +101,6 @@ bool App::Init(HINSTANCE hInstance, HWND hMainWnd) {
             m_overlayEnabled = true;
         } else {
             LOG_WARN("Failed to initialize overlay feature");
-            // Continue anyway - overlay is optional
         }
     }
 
@@ -130,6 +130,9 @@ bool App::Init(HINSTANCE hInstance, HWND hMainWnd) {
     // Initialize per-monitor horizontal flip (teleprompter mirror)
     FlipManager::Instance().Init(m_hInstance, m_hMainWnd);
 
+    // Initialize native speech-following Presenter
+    PresenterController::Instance().Init(m_hInstance, m_hMainWnd);
+
     // Register flip toggle hotkey
     UINT flipMods = 0, flipVk = 0;
     if (ParseHotkeyString(config.flip.toggleHotkey, flipMods, flipVk)) {
@@ -137,6 +140,16 @@ bool App::Init(HINSTANCE hInstance, HWND hMainWnd) {
             LOG_INFO("Registered flip toggle hotkey: %ws", config.flip.toggleHotkey.c_str());
         } else {
             LOG_WARN("Failed to register flip toggle hotkey");
+        }
+    }
+
+    // Register presenter toggle hotkey
+    UINT presMods = 0, presVk = 0;
+    if (ParseHotkeyString(config.presenter.toggleHotkey, presMods, presVk)) {
+        if (RegisterHotKey(m_hMainWnd, HOTKEY_PRESENTER_TOGGLE, presMods | MOD_NOREPEAT, presVk)) {
+            LOG_INFO("Registered presenter toggle hotkey: %ws", config.presenter.toggleHotkey.c_str());
+        } else {
+            LOG_WARN("Failed to register presenter toggle hotkey");
         }
     }
 
@@ -167,8 +180,6 @@ void App::Run() {
     }
 
     LOG_DEBUG("Application running");
-    // Note: Message loop is handled in main.cpp
-    // This method can be used for any per-frame updates if needed
 }
 
 void App::Shutdown() {
@@ -183,12 +194,16 @@ void App::Shutdown() {
     if (m_hMainWnd) {
         UnregisterHotKey(m_hMainWnd, HOTKEY_OVERLAY_TOGGLE);
         UnregisterHotKey(m_hMainWnd, HOTKEY_FLIP_TOGGLE);
+        UnregisterHotKey(m_hMainWnd, HOTKEY_PRESENTER_TOGGLE);
         UnregisterHotKey(m_hMainWnd, HOTKEY_SETTINGS);
     }
 
     if (m_hMainWnd) {
         KillTimer(m_hMainWnd, TIMER_DESKTOP_POLL);
     }
+
+    // Shutdown Presenter
+    PresenterController::Instance().Shutdown();
 
     // Shutdown flip (teleprompter mirror)
     FlipManager::Instance().Shutdown();
@@ -207,20 +222,15 @@ void App::Shutdown() {
     // Shutdown tray icon
     TrayIcon::Instance().Shutdown();
 
-    // Future cleanup:
-    // m_trayIcon.reset();
-
     m_initialized = false;
     LOG_INFO("Application shutdown complete");
 }
 
 bool App::InitMonitors() {
-    // Monitor utility initializes itself on first access
     auto& monitor = Monitor::Instance();
     
     if (monitor.GetCount() == 0) {
         LOG_WARN("No monitors detected");
-        // This shouldn't happen, but try to refresh
         monitor.Refresh();
     }
 
@@ -241,39 +251,32 @@ bool App::InitOverlay() {
     
     LOG_INFO("InitOverlay: config.overlay.position=%d", static_cast<int>(config.overlay.position));
 
-    // Initialize VirtualDesktop COM interfaces
     if (!VirtualDesktop::Instance().Init()) {
         LOG_WARN("Failed to initialize VirtualDesktop - overlay will be limited");
-        // Continue - we'll show overlay without desktop info
     }
 
-    // Initialize overlay window
     if (!OverlayWindow::Instance().Init(m_hInstance)) {
         LOG_ERROR("Failed to initialize OverlayWindow");
         return false;
     }
 
-    // Build OverlaySettings from app config (with type conversions)
     OverlaySettings overlaySettings;
     overlaySettings.enabled = config.overlay.enabled;
     overlaySettings.mode = config.overlay.mode;
-    overlaySettings.position = config.overlay.position;  // Same type
-    overlaySettings.monitor = config.overlay.monitor;    // Same type
+    overlaySettings.position = config.overlay.position;
+    overlaySettings.monitor = config.overlay.monitor;
     overlaySettings.format = config.overlay.format;
     overlaySettings.autoHide = config.overlay.autoHide;
     overlaySettings.autoHideDelayMs = config.overlay.autoHideDelayMs;
     
-    // Watermark settings
     overlaySettings.watermarkFontSize = config.overlay.watermarkFontSize;
     overlaySettings.watermarkOpacity = config.overlay.watermarkOpacity;
     overlaySettings.watermarkShadow = config.overlay.watermarkShadow;
     overlaySettings.watermarkColor = config.overlay.watermarkColor;
     
-    // Dodge settings
     overlaySettings.dodgeOnHover = config.overlay.dodgeOnHover;
     overlaySettings.dodgeProximity = config.overlay.dodgeProximity;
     
-    // Style settings - BlurType maps to backdrop
     overlaySettings.style.backdrop = config.overlay.style.blur;
     overlaySettings.style.tintColor = config.overlay.style.tintColor;
     overlaySettings.style.tintOpacity = config.overlay.style.tintOpacity;
@@ -282,13 +285,11 @@ bool App::InitOverlay() {
     overlaySettings.style.borderWidth = config.overlay.style.borderWidth;
     overlaySettings.style.borderColor = config.overlay.style.borderColor;
     
-    // Text settings
     overlaySettings.text.fontFamily = config.overlay.text.fontFamily;
     overlaySettings.text.fontSize = config.overlay.text.fontSize;
     overlaySettings.text.fontWeight = config.overlay.text.fontWeight;
     overlaySettings.text.color = config.overlay.text.color;
     
-    // Animation settings
     overlaySettings.animation.fadeInDurationMs = config.overlay.animation.fadeInDurationMs;
     overlaySettings.animation.fadeOutDurationMs = config.overlay.animation.fadeOutDurationMs;
     overlaySettings.animation.slideIn = config.overlay.animation.slideIn;
@@ -296,18 +297,15 @@ bool App::InitOverlay() {
     
     OverlayWindow::Instance().ApplySettings(overlaySettings);
 
-    // Register for desktop change notifications
     VirtualDesktop::Instance().SetDesktopSwitchCallback(
         [](int index, const std::wstring& name) {
             App::Instance().OnDesktopSwitched(index, name);
         }
     );
     
-    // Start desktop polling timer (managed by App for reliable message pump delivery)
     SetTimer(m_hMainWnd, TIMER_DESKTOP_POLL, TIMER_DESKTOP_POLL_MS, nullptr);
     LOG_INFO("Started desktop polling timer");
 
-    // For watermark mode, show immediately with current desktop info
     if (config.overlay.mode == OverlayMode::Watermark && config.overlay.enabled) {
         LOG_INFO("Watermark mode enabled, showing overlay on startup");
         DesktopInfo desktopInfo;
@@ -315,13 +313,9 @@ bool App::InitOverlay() {
             LOG_INFO("Current desktop: index=%d, name=%ws", desktopInfo.index, desktopInfo.name.c_str());
             OverlayWindow::Instance().Show(desktopInfo.index, desktopInfo.name);
         } else {
-            // Fallback: show with desktop 1
             LOG_WARN("Failed to get current desktop, using fallback");
             OverlayWindow::Instance().Show(1, L"Desktop 1");
         }
-    } else {
-        LOG_INFO("Not showing watermark on startup: mode=%d, enabled=%d",
-                 static_cast<int>(config.overlay.mode), config.overlay.enabled ? 1 : 0);
     }
 
     LOG_INFO("Overlay feature initialized (VirtualDesktop available: %s)",
@@ -330,16 +324,23 @@ bool App::InitOverlay() {
 }
 
 void App::OnDesktopSwitched(int desktopIndex, const std::wstring& desktopName) {
-    if (!m_overlayEnabled) {
-        return;
+    if (m_overlayEnabled) {
+        LOG_DEBUG("Desktop switch event: %d (%ws)", desktopIndex, desktopName.c_str());
+        OverlayWindow::Instance().Show(desktopIndex, desktopName);
     }
 
-    LOG_DEBUG("Desktop switch event: %d (%ws)", desktopIndex, desktopName.c_str());
-    OverlayWindow::Instance().Show(desktopIndex, desktopName);
+    // Move Presenter window to current virtual desktop if open
+    if (PresenterController::Instance().IsOpen()) {
+        PresenterController::Instance().OnDisplayChanged();
+    }
 }
 
 void App::OnToggleFlip() {
     FlipManager::Instance().ToggleUnderCursor();
+}
+
+void App::OnTogglePresenter() {
+    PresenterController::Instance().Toggle();
 }
 
 void App::OnToggleOverlay() {
@@ -351,7 +352,6 @@ void App::OnToggleOverlay() {
         OverlayWindow::Instance().Hide();
         LOG_DEBUG("Overlay hidden via hotkey");
     } else {
-        // Show overlay with current desktop info
         DesktopInfo desktopInfo;
         if (VirtualDesktop::Instance().GetCurrentDesktop(desktopInfo)) {
             OverlayWindow::Instance().Show(desktopInfo.index, desktopInfo.name);
@@ -366,13 +366,12 @@ void App::OnDisplayChange() {
     LOG_INFO("Display configuration changed, refreshing monitors");
     Monitor::Instance().Refresh();
     
-    // Notify overlay to reposition
     if (m_overlayEnabled) {
         OverlayWindow::Instance().OnDisplayChanged();
     }
 
-    // Re-apply mirrors to the refreshed monitor set
     FlipManager::Instance().OnDisplayChanged();
+    PresenterController::Instance().OnDisplayChanged();
 }
 
 void App::OnDpiChanged(HWND hwnd, UINT dpi, const RECT* suggested) {
@@ -387,12 +386,7 @@ void App::OnSettingsChanged() {
     LOG_INFO("Settings changed, applying from Config");
     
     const auto& config = Config::Instance().Get();
-    
-    LOG_INFO("Config values: overlay.position=%d, overlay.style.blur=%d",
-             static_cast<int>(config.overlay.position),
-             static_cast<int>(config.overlay.style.blur));
 
-    // Update overlay settings if enabled
     if (m_overlayEnabled) {
         OverlaySettings overlaySettings;
         overlaySettings.enabled = config.overlay.enabled;
@@ -403,13 +397,11 @@ void App::OnSettingsChanged() {
         overlaySettings.autoHide = config.overlay.autoHide;
         overlaySettings.autoHideDelayMs = config.overlay.autoHideDelayMs;
         
-        // Watermark settings
         overlaySettings.watermarkFontSize = config.overlay.watermarkFontSize;
         overlaySettings.watermarkOpacity = config.overlay.watermarkOpacity;
         overlaySettings.watermarkShadow = config.overlay.watermarkShadow;
         overlaySettings.watermarkColor = config.overlay.watermarkColor;
         
-        // Dodge settings
         overlaySettings.dodgeOnHover = config.overlay.dodgeOnHover;
         overlaySettings.dodgeProximity = config.overlay.dodgeProximity;
         
@@ -432,9 +424,7 @@ void App::OnSettingsChanged() {
         overlaySettings.animation.slideDistance = config.overlay.animation.slideDistance;
         
         OverlayWindow::Instance().ApplySettings(overlaySettings);
-        LOG_INFO("Overlay settings applied");
         
-        // In watermark mode, refresh with real desktop name (not preview text)
         if (config.overlay.mode == OverlayMode::Watermark && config.overlay.enabled) {
             DesktopInfo desktopInfo;
             if (VirtualDesktop::Instance().GetCurrentDesktop(desktopInfo)) {
@@ -443,8 +433,9 @@ void App::OnSettingsChanged() {
         }
     }
 
-    // Re-apply flip settings
+    // Re-apply flip and presenter settings
     FlipManager::Instance().ApplySettings();
+    PresenterController::Instance().ApplySettings();
 
     // Re-register hotkeys
     if (m_hMainWnd) {
@@ -460,6 +451,12 @@ void App::OnSettingsChanged() {
             RegisterHotKey(m_hMainWnd, HOTKEY_FLIP_TOGGLE, flipMods | MOD_NOREPEAT, flipVk);
         }
 
+        UnregisterHotKey(m_hMainWnd, HOTKEY_PRESENTER_TOGGLE);
+        UINT presMods = 0, presVk = 0;
+        if (ParseHotkeyString(config.presenter.toggleHotkey, presMods, presVk)) {
+            RegisterHotKey(m_hMainWnd, HOTKEY_PRESENTER_TOGGLE, presMods | MOD_NOREPEAT, presVk);
+        }
+
         UnregisterHotKey(m_hMainWnd, HOTKEY_SETTINGS);
         UINT settingsMods = 0, settingsVk = 0;
         if (ParseHotkeyString(config.general.settingsHotkey, settingsMods, settingsVk)) {
@@ -471,10 +468,8 @@ void App::OnSettingsChanged() {
 void App::OnDesktopPollTimer() {
     if (!m_overlayEnabled) return;
     
-    // Call VirtualDesktop to check for desktop changes
     VirtualDesktop::Instance().CheckDesktopChange();
 
-    // Periodically verify overlay position matches current live monitor workArea
     static unsigned int s_posCheckTick = 0;
     if (++s_posCheckTick % 4 == 0) {
         OverlayWindow::Instance().CheckPosition();
@@ -487,7 +482,6 @@ bool App::InitSettings() {
         return false;
     }
 
-    // Set callback to reload settings when applied
     SettingsWindow::Instance().SetApplyCallback([this]() {
         OnSettingsChanged();
     });
@@ -506,7 +500,6 @@ bool App::InitTrayIcon() {
         return false;
     }
 
-    // Set callbacks
     TrayIcon::Instance().SetSettingsCallback([this]() {
         OpenSettings();
     });
@@ -535,9 +528,10 @@ void App::ShowAbout() {
     MessageBoxW(
         m_hMainWnd,
         L"Virtual Overlay\n"
-        L"Version 1.1.0\n\n"
-        L"A Windows utility for virtual desktop overlay\n"
-        L"and desktop watermark display.\n\n"
+        L"Version 1.2.0\n\n"
+        L"A Windows utility for virtual desktop overlay,\n"
+        L"teleprompter screen flipping, and offline speech-following presenter.\n\n"
+        L"Speech alignment adapted from TalkPrompter (\u00A9 2026 Sven Bosau, MIT).\n"
         L"\u00A9 2026 Virtual Overlay Contributors",
         L"About Virtual Overlay",
         MB_OK | MB_ICONINFORMATION

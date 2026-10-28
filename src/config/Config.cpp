@@ -192,6 +192,65 @@ bool Config::Load(const std::wstring& filePath) {
                 }
             }
         }
+
+        // Parse presenter settings
+        if (j.contains("presenter") && j["presenter"].is_object()) {
+            auto& p = j["presenter"];
+            if (p.contains("enabled")) m_config.presenter.enabled = p["enabled"].get<bool>();
+            if (p.contains("toggleHotkey") && p["toggleHotkey"].is_string()) {
+                m_config.presenter.toggleHotkey = Utf8ToWide(p["toggleHotkey"].get<std::string>());
+            }
+            if (p.contains("fontFamily") && p["fontFamily"].is_string()) {
+                m_config.presenter.fontFamily = Utf8ToWide(p["fontFamily"].get<std::string>());
+            }
+            if (p.contains("fontSize")) m_config.presenter.fontSize = p["fontSize"].get<int>();
+            if (p.contains("captionWidth")) m_config.presenter.captionWidth = p["captionWidth"].get<int>();
+            if (p.contains("textColor") && p["textColor"].is_string()) {
+                m_config.presenter.textColor = ParseColor(p["textColor"].get<std::string>());
+            }
+            if (p.contains("textOpacity")) m_config.presenter.textOpacity = p["textOpacity"].get<float>();
+            if (p.contains("showBackground")) m_config.presenter.showBackground = p["showBackground"].get<bool>();
+            if (p.contains("bgColor") && p["bgColor"].is_string()) {
+                m_config.presenter.bgColor = ParseColor(p["bgColor"].get<std::string>());
+            }
+            if (p.contains("bgOpacity")) m_config.presenter.bgOpacity = p["bgOpacity"].get<float>();
+            if (p.contains("previousLines")) m_config.presenter.previousLines = p["previousLines"].get<int>();
+            if (p.contains("upcomingLines")) m_config.presenter.upcomingLines = p["upcomingLines"].get<int>();
+            if (p.contains("smoothTime")) m_config.presenter.smoothTime = p["smoothTime"].get<float>();
+            if (p.contains("targetMonitor") && p["targetMonitor"].is_string()) {
+                m_config.presenter.targetMonitor = Utf8ToWide(p["targetMonitor"].get<std::string>());
+            }
+            if (p.contains("audioDeviceId") && p["audioDeviceId"].is_string()) {
+                m_config.presenter.audioDeviceId = Utf8ToWide(p["audioDeviceId"].get<std::string>());
+            }
+            if (p.contains("audioDeviceName") && p["audioDeviceName"].is_string()) {
+                m_config.presenter.audioDeviceName = Utf8ToWide(p["audioDeviceName"].get<std::string>());
+            }
+            if (p.contains("audioChannel")) m_config.presenter.audioChannel = p["audioChannel"].get<int>();
+            if (p.contains("voskModelPath") && p["voskModelPath"].is_string()) {
+                m_config.presenter.voskModelPath = Utf8ToWide(p["voskModelPath"].get<std::string>());
+            }
+            if (p.contains("scriptText") && p["scriptText"].is_string()) {
+                m_config.presenter.scriptText = Utf8ToWide(p["scriptText"].get<std::string>());
+            }
+            if (p.contains("scriptFilePath") && p["scriptFilePath"].is_string()) {
+                m_config.presenter.scriptFilePath = Utf8ToWide(p["scriptFilePath"].get<std::string>());
+            }
+            if (p.contains("savedTokenIndex")) m_config.presenter.savedTokenIndex = p["savedTokenIndex"].get<int>();
+            if (p.contains("monitorAnchors") && p["monitorAnchors"].is_object()) {
+                m_config.presenter.monitorAnchors.clear();
+                for (auto it = p["monitorAnchors"].begin(); it != p["monitorAnchors"].end(); ++it) {
+                    if (it.value().is_object()) {
+                        PresenterMonitorAnchor anchor;
+                        if (it.value().contains("normX")) anchor.normX = it.value()["normX"].get<float>();
+                        if (it.value().contains("normY")) anchor.normY = it.value()["normY"].get<float>();
+                        anchor.normX = std::clamp(anchor.normX, 0.05f, 0.95f);
+                        anchor.normY = std::clamp(anchor.normY, 0.02f, 0.95f);
+                        m_config.presenter.monitorAnchors[Utf8ToWide(it.key())] = anchor;
+                    }
+                }
+            }
+        }
         
         // Clamp values to valid ranges
         ClampValues(m_config);
@@ -288,6 +347,36 @@ bool Config::Save(const std::wstring& filePath) {
         for (const auto& mon : m_config.flip.monitors) {
             j["flip"]["monitors"].push_back(WideToUtf8(mon));
         }
+
+        // Presenter
+        j["presenter"]["enabled"] = m_config.presenter.enabled;
+        j["presenter"]["toggleHotkey"] = WideToUtf8(m_config.presenter.toggleHotkey);
+        j["presenter"]["fontFamily"] = WideToUtf8(m_config.presenter.fontFamily);
+        j["presenter"]["fontSize"] = m_config.presenter.fontSize;
+        j["presenter"]["captionWidth"] = m_config.presenter.captionWidth;
+        j["presenter"]["textColor"] = ColorToHex(m_config.presenter.textColor);
+        j["presenter"]["textOpacity"] = m_config.presenter.textOpacity;
+        j["presenter"]["showBackground"] = m_config.presenter.showBackground;
+        j["presenter"]["bgColor"] = ColorToHex(m_config.presenter.bgColor);
+        j["presenter"]["bgOpacity"] = m_config.presenter.bgOpacity;
+        j["presenter"]["previousLines"] = m_config.presenter.previousLines;
+        j["presenter"]["upcomingLines"] = m_config.presenter.upcomingLines;
+        j["presenter"]["smoothTime"] = m_config.presenter.smoothTime;
+        j["presenter"]["targetMonitor"] = WideToUtf8(m_config.presenter.targetMonitor);
+        j["presenter"]["audioDeviceId"] = WideToUtf8(m_config.presenter.audioDeviceId);
+        j["presenter"]["audioDeviceName"] = WideToUtf8(m_config.presenter.audioDeviceName);
+        j["presenter"]["audioChannel"] = m_config.presenter.audioChannel;
+        j["presenter"]["voskModelPath"] = WideToUtf8(m_config.presenter.voskModelPath);
+        j["presenter"]["scriptText"] = WideToUtf8(m_config.presenter.scriptText);
+        j["presenter"]["scriptFilePath"] = WideToUtf8(m_config.presenter.scriptFilePath);
+        j["presenter"]["savedTokenIndex"] = m_config.presenter.savedTokenIndex;
+        j["presenter"]["monitorAnchors"] = json::object();
+        for (const auto& [monId, anchor] : m_config.presenter.monitorAnchors) {
+            j["presenter"]["monitorAnchors"][WideToUtf8(monId)] = {
+                { "normX", anchor.normX },
+                { "normY", anchor.normY }
+            };
+        }
         
         // Write to temp file first, then rename (atomic save)
         fs::path tempPath = path;
@@ -364,6 +453,16 @@ void Config::ClampValues(AppConfig& config) {
     config.overlay.animation.fadeInDurationMs = std::clamp(config.overlay.animation.fadeInDurationMs, 0, 500);
     config.overlay.animation.fadeOutDurationMs = std::clamp(config.overlay.animation.fadeOutDurationMs, 0, 500);
     config.overlay.animation.slideDistance = std::clamp(config.overlay.animation.slideDistance, 0, 50);
+
+    // Clamp presenter values
+    config.presenter.fontSize = std::clamp(config.presenter.fontSize, 16, 96);
+    config.presenter.captionWidth = std::clamp(config.presenter.captionWidth, 320, 2400);
+    config.presenter.textOpacity = std::clamp(config.presenter.textOpacity, 0.2f, 1.0f);
+    config.presenter.bgOpacity = std::clamp(config.presenter.bgOpacity, 0.0f, 1.0f);
+    config.presenter.previousLines = std::clamp(config.presenter.previousLines, 0, 1);
+    config.presenter.upcomingLines = std::clamp(config.presenter.upcomingLines, 1, 2);
+    config.presenter.smoothTime = std::clamp(config.presenter.smoothTime, 0.05f, 1.0f);
+    config.presenter.audioChannel = std::clamp(config.presenter.audioChannel, 0, 32);
 }
 
 // Enum conversion helpers

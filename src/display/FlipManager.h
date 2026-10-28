@@ -53,6 +53,9 @@ public:
     // Called on the cursor/watchdog timer.
     void OnCursorTimer();
 
+    // Ensure all active mirror windows remain at the top of the HWND_TOPMOST band.
+    void RaiseMirrorsToTop();
+
 private:
     FlipManager();
     ~FlipManager();

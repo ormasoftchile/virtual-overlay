@@ -8,6 +8,7 @@
 #include "utils/Logger.h"
 #include "config/Config.h"
 #include "display/FlipManager.h"
+#include "presenter/PresenterController.h"
 #include "tray/TrayIcon.h"
 
 // Application name for mutex and window class
@@ -197,7 +198,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_BRINGTOFRONT:
-            // Another instance tried to start - could open settings here
             LOG_DEBUG("Received bring-to-front request from another instance");
             VirtualOverlay::App::Instance().OpenSettings();
             return 0;
@@ -210,8 +210,19 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             VirtualOverlay::TrayIcon::Instance().HandleMessage(wParam, lParam);
             return 0;
 
+        case VirtualOverlay::WM_APP_PRESENTER_HYPOTHESIS:
+            VirtualOverlay::PresenterController::Instance().OnHypothesisMessage();
+            return 0;
+
+        case VirtualOverlay::WM_APP_PRESENTER_STATUS:
+            VirtualOverlay::PresenterController::Instance().OnStatusMessage();
+            return 0;
+
+        case VirtualOverlay::WM_APP_PRESENTER_AUDIO_LVL:
+            VirtualOverlay::PresenterController::Instance().OnAudioLevelMessage();
+            return 0;
+
         case WM_DISPLAYCHANGE:
-            // Monitor configuration changed
             VirtualOverlay::App::Instance().OnDisplayChange();
             return 0;
 
@@ -222,7 +233,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_DPICHANGED: {
-            // DPI changed
             UINT newDpi = HIWORD(wParam);
             RECT* suggested = reinterpret_cast<RECT*>(lParam);
             VirtualOverlay::App::Instance().OnDpiChanged(hwnd, newDpi, suggested);
@@ -234,6 +244,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 VirtualOverlay::App::Instance().OnToggleOverlay();
             } else if (wParam == VirtualOverlay::HOTKEY_FLIP_TOGGLE) {
                 VirtualOverlay::App::Instance().OnToggleFlip();
+            } else if (wParam == VirtualOverlay::HOTKEY_PRESENTER_TOGGLE) {
+                VirtualOverlay::App::Instance().OnTogglePresenter();
             } else if (wParam == VirtualOverlay::HOTKEY_SETTINGS) {
                 VirtualOverlay::App::Instance().OpenSettings();
             }
