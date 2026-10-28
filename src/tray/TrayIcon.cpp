@@ -2,6 +2,8 @@
 #include "../utils/Logger.h"
 #include "../utils/Monitor.h"
 #include "../config/Defaults.h"
+#include "../config/Config.h"
+#include "../presenter/PresenterController.h"
 #include <shlobj.h>
 
 #pragma comment(lib, "shell32.lib")
@@ -105,6 +107,41 @@ void TrayIcon::BuildContextMenu() {
 
     AppendMenuW(m_hMenu, MF_STRING, IDM_TRAY_SETTINGS, L"&Settings...");
     AppendMenuW(m_hMenu, MF_SEPARATOR, 0, nullptr);
+
+    // Presenter (speech-following teleprompter) submenu
+    HMENU hPresMenu = CreatePopupMenu();
+    if (hPresMenu) {
+        auto& pres = PresenterController::Instance();
+        UINT openFlags = MF_STRING | (pres.IsOpen() ? MF_CHECKED : 0);
+        AppendMenuW(hPresMenu, openFlags, IDM_TRAY_PRES_TOGGLE, L"&Show Presenter\tCtrl+Shift+P");
+
+        UINT pauseFlags = MF_STRING | (pres.IsPaused() ? MF_CHECKED : 0);
+        if (!pres.IsOpen()) pauseFlags |= MF_GRAYED;
+        AppendMenuW(hPresMenu, pauseFlags, IDM_TRAY_PRES_PAUSE, L"&Pause Speech Tracking");
+
+        AppendMenuW(hPresMenu, MF_STRING, IDM_TRAY_PRES_RESET, L"&Reset to Beginning");
+        AppendMenuW(hPresMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hPresMenu, MF_STRING, IDM_TRAY_PRES_PASTE, L"Paste Script from &Clipboard");
+        AppendMenuW(hPresMenu, MF_STRING, IDM_TRAY_PRES_LOAD, L"&Load Script File (.txt / .md)...");
+
+        // Microphone submenu inside Presenter menu
+        HMENU hMicMenu = CreatePopupMenu();
+        if (hMicMenu) {
+            const auto& selId = Config::Instance().Get().presenter.audioDeviceId;
+            auto devices = pres.GetAudioDevices();
+            for (size_t i = 0; i < devices.size() && i < IDM_TRAY_PRES_MIC_MAX; ++i) {
+                UINT mFlags = MF_STRING | (devices[i].id == selId ? MF_CHECKED : 0);
+                AppendMenuW(hMicMenu, mFlags,
+                            IDM_TRAY_PRES_MIC_BASE + static_cast<UINT>(i),
+                            devices[i].friendlyName.c_str());
+            }
+            AppendMenuW(hPresMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hPresMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hMicMenu), L"&Microphone");
+        }
+
+        AppendMenuW(m_hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hPresMenu),
+                    L"&Presenter (Speech Following)");
+    }
 
     // Refresh monitors so newly attached/detached displays are current
     Monitor::Instance().Refresh();
@@ -333,12 +370,38 @@ void TrayIcon::ShowContextMenu() {
             SetAutoStart(!IsAutoStartEnabled());
             break;
 
+        case IDM_TRAY_PRES_TOGGLE:
+            PresenterController::Instance().Toggle();
+            break;
+
+        case IDM_TRAY_PRES_PAUSE:
+            PresenterController::Instance().TogglePause();
+            break;
+
+        case IDM_TRAY_PRES_RESET:
+            PresenterController::Instance().ResetToStart();
+            break;
+
+        case IDM_TRAY_PRES_PASTE:
+            PresenterController::Instance().PasteScriptFromClipboard();
+            break;
+
+        case IDM_TRAY_PRES_LOAD:
+            PresenterController::Instance().PromptAndLoadScriptFile(m_hParentWnd);
+            break;
+
         default:
             if (cmd >= IDM_TRAY_FLIP_BASE && cmd < IDM_TRAY_FLIP_BASE + IDM_TRAY_FLIP_MAX) {
                 const auto& monitors = Monitor::Instance().GetMonitors();
                 const size_t index = cmd - IDM_TRAY_FLIP_BASE;
                 if (index < monitors.size() && m_onFlipToggle) {
                     m_onFlipToggle(monitors[index].GetId());
+                }
+            } else if (cmd >= IDM_TRAY_PRES_MIC_BASE && cmd < IDM_TRAY_PRES_MIC_BASE + IDM_TRAY_PRES_MIC_MAX) {
+                auto devices = PresenterController::Instance().GetAudioDevices();
+                const size_t index = cmd - IDM_TRAY_PRES_MIC_BASE;
+                if (index < devices.size()) {
+                    PresenterController::Instance().SelectAudioDevice(devices[index].id, devices[index].friendlyName, 0);
                 }
             }
             break;

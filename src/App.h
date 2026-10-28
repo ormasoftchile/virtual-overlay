@@ -17,6 +17,7 @@ constexpr UINT TIMER_DESKTOP_POLL_MS = 150;  // Desktop switch detection
 constexpr int HOTKEY_OVERLAY_TOGGLE = 1;
 constexpr int HOTKEY_FLIP_TOGGLE = 2;
 constexpr int HOTKEY_SETTINGS = 3;
+constexpr int HOTKEY_PRESENTER_TOGGLE = 4;
 
 // Application lifecycle controller
 class App {
@@ -51,6 +52,9 @@ public:
 
     // Flip (teleprompter mirror) event handler
     void OnToggleFlip();
+
+    // Presenter (speech-following teleprompter) event handler
+    void OnTogglePresenter();
 
     // Settings window
     void OpenSettings();

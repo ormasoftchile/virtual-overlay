@@ -21,6 +21,15 @@ constexpr UINT IDM_TRAY_AUTOSTART = 1004;
 constexpr UINT IDM_TRAY_FLIP_BASE = 1100;
 constexpr UINT IDM_TRAY_FLIP_MAX = 32;
 
+// Presenter menu item IDs
+constexpr UINT IDM_TRAY_PRES_TOGGLE = 1200;
+constexpr UINT IDM_TRAY_PRES_PAUSE  = 1201;
+constexpr UINT IDM_TRAY_PRES_RESET  = 1202;
+constexpr UINT IDM_TRAY_PRES_PASTE  = 1203;
+constexpr UINT IDM_TRAY_PRES_LOAD   = 1204;
+constexpr UINT IDM_TRAY_PRES_MIC_BASE = 1220;
+constexpr UINT IDM_TRAY_PRES_MIC_MAX  = 32;
+
 // Tray icon manager
 class TrayIcon {
 public:

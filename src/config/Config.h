@@ -4,6 +4,7 @@
 #include <optional>
 #include <cstdint>
 #include <vector>
+#include <map>
 
 namespace VirtualOverlay {
 
@@ -118,12 +119,49 @@ struct FlipConfig {
     std::vector<std::wstring> monitors;
 };
 
+// Per-monitor reading-baseline anchor in display-relative normalized coordinates [0.0, 1.0]
+struct PresenterMonitorAnchor {
+    float normX = 0.50f;   // Horizontal center relative to monitor width
+    float normY = 0.14f;   // Vertical reading baseline relative to monitor height (just above camera lens)
+};
+
+// Native speech-following Presenter settings
+struct PresenterConfig {
+    bool enabled = false;
+    std::wstring toggleHotkey = L"Ctrl+Shift+P";
+    std::wstring fontFamily = L"Segoe UI Variable";
+    int fontSize = 32;
+    int captionWidth = 840;
+    uint32_t textColor = 0xFFFFFF;     // RGB
+    float textOpacity = 0.96f;
+    bool showBackground = true;
+    uint32_t bgColor = 0x0E121A;       // RGB
+    float bgOpacity = 0.76f;
+    int previousLines = 1;             // 0 or 1
+    int upcomingLines = 2;             // 1 or 2
+    float smoothTime = 0.28f;
+    std::wstring targetMonitor = L"";  // Stable monitor ID (e.g. "MNN"), or "" for auto (teleprompter/primary)
+    std::wstring audioDeviceId = L"default";
+    std::wstring audioDeviceName = L"";
+    int audioChannel = 0;              // 0 = all channels (mono mixdown), 1+ = 1-based channel
+    std::wstring voskModelPath = L"";
+    std::wstring scriptText =
+        L"Welcome to Virtual Overlay Presenter.\n"
+        L"Hold Alt and drag anywhere on this caption to place the reading line right above your camera lens.\n"
+        L"As you speak into your selected microphone, the script advances smoothly at your natural speaking pace.\n"
+        L"You can pause, resume, switch microphones, or load any text or markdown script from the tray menu or settings.";
+    std::wstring scriptFilePath = L"";
+    int savedTokenIndex = -1;
+    std::map<std::wstring, PresenterMonitorAnchor> monitorAnchors;
+};
+
 // Complete configuration
 struct AppConfig {
     std::wstring schema = L"virtual-overlay-config-v1";
     GeneralConfig general;
     OverlayConfig overlay;
     FlipConfig flip;
+    PresenterConfig presenter;
 };
 
 // Configuration manager

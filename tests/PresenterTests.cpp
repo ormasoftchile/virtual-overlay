@@ -1,0 +1,640 @@
+// Deterministic Unit & Integration Tests for Virtual Overlay Presenter
+// Covers:
+// 1. Speech-to-script alignment engine (ScriptAlignmentEngine, ScriptModel, TextNormalizer, NumberExpander, Levenshtein, SmoothDamp)
+// 2. Audio subsystem (AudioResampler format/channel/sample-rate conversion, AudioInputManager enumeration & unavailable device handling, OfflineSpeechRecognizer grammar & model validation)
+// 3. Presenter integration (PresenterWindow layout/line mapping, fixed reading baseline invariance, per-monitor anchor persistence, Pause/Resume/Close/Reopen lifecycle)
+
+#include <windows.h>
+#include <objbase.h>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "../src/config/Config.h"
+#include "../src/presenter/AudioInputManager.h"
+#include "../src/presenter/OfflineSpeechRecognizer.h"
+#include "../src/presenter/PresenterController.h"
+#include "../src/presenter/PresenterWindow.h"
+#include "../src/presenter/ScriptAlignmentEngine.h"
+#include "../src/utils/D2DRenderer.h"
+#include "../src/utils/Monitor.h"
+
+namespace fs = std::filesystem;
+using namespace VirtualOverlay;
+
+static int g_passed = 0;
+static int g_failed = 0;
+
+#define EXPECT_TRUE(cond, msg)                                                        \
+    do {                                                                              \
+        if (!(cond)) {                                                                \
+            std::printf("  [FAIL] %s:%d: %s\n", __FILE__, __LINE__, (msg));           \
+            g_failed++;                                                               \
+            return;                                                                   \
+        }                                                                             \
+    } while (0)
+
+#define EXPECT_EQ(actual, expected, msg)                                              \
+    do {                                                                              \
+        auto _a = (actual);                                                           \
+        auto _e = (expected);                                                         \
+        if (!(_a == _e)) {                                                            \
+            std::printf("  [FAIL] %s:%d: %s\n", __FILE__, __LINE__, (msg));           \
+            g_failed++;                                                               \
+            return;                                                                   \
+        }                                                                             \
+    } while (0)
+
+static void RunTest(const char* name, void (*fn)()) {
+    int beforeFail = g_failed;
+    fn();
+    if (g_failed == beforeFail) {
+        g_passed++;
+        std::printf("  [PASS] %s\n", name);
+    }
+}
+
+static std::string WordAt(const ScriptModel& model, int tokenIndex) {
+    if (tokenIndex >= 0 && tokenIndex < model.TokenCount()) {
+        return model.Tokens()[static_cast<size_t>(tokenIndex)].normalized;
+    }
+    return "<none>";
+}
+
+static MatchUpdate FeedGrowing(ScriptAlignmentEngine& matcher, const std::string& utterance) {
+    std::istringstream iss(utterance);
+    std::vector<std::string> words;
+    std::string w;
+    while (iss >> w) {
+        words.push_back(w);
+    }
+
+    MatchUpdate update{};
+    std::string prefix;
+    for (size_t i = 0; i < words.size(); ++i) {
+        if (i > 0) prefix += " ";
+        prefix += words[i];
+        update = matcher.Process(prefix);
+    }
+    return update;
+}
+
+// =============================================================================
+// 1. Speech Alignment Unit Tests
+// =============================================================================
+
+static const char* kFox = "The quick brown fox jumps over the lazy dog.";
+
+static void TestNumberExpander() {
+    auto joinWords = [](const std::vector<std::string>& v) {
+        std::string s;
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i > 0) s += " ";
+            s += v[i];
+        }
+        return s;
+    };
+
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("0")), std::string("zero"), "0 -> zero");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("5")), std::string("five"), "5 -> five");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("13")), std::string("thirteen"), "13 -> thirteen");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("25")), std::string("twenty five"), "25 -> twenty five");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("100")), std::string("one hundred"), "100 -> one hundred");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("135")), std::string("one hundred thirty five"), "135 -> one hundred thirty five");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("2025")), std::string("two thousand twenty five"), "2025 -> two thousand twenty five");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("007")), std::string("seven"), "007 -> seven");
+    EXPECT_EQ(joinWords(NumberExpander::ToWords("abc")), std::string("abc"), "non-numeric unchanged");
+    EXPECT_TRUE(NumberExpander::IsAllDigits("123"), "123 is all digits");
+    EXPECT_TRUE(!NumberExpander::IsAllDigits(""), "empty is not all digits");
+    EXPECT_TRUE(!NumberExpander::IsAllDigits("12a"), "12a is not all digits");
+}
+
+static void TestTextNormalizer() {
+    EXPECT_EQ(TextNormalizer::NormalizeWordUtf8("Hello,"), std::string("hello"), "strip comma and lowercase");
+    EXPECT_EQ(TextNormalizer::NormalizeWordUtf8("WORLD!"), std::string("world"), "strip bang and lowercase");
+    EXPECT_EQ(TextNormalizer::NormalizeWordUtf8("don't"), std::string("dont"), "strip apostrophe");
+    EXPECT_EQ(TextNormalizer::NormalizeWordUtf8("..."), std::string(""), "punctuation only -> empty");
+
+    auto matchWords = TextNormalizer::ToMatchWordsUtf8("I have 25 cats");
+    EXPECT_EQ(matchWords.size(), size_t(5), "25 expands to 2 words");
+    EXPECT_EQ(matchWords[2], std::string("twenty"), "twenty");
+    EXPECT_EQ(matchWords[3], std::string("five"), "five");
+
+    std::wstring text = L"The quick, brown fox.";
+    auto tokens = TextNormalizer::Tokenize(text);
+    EXPECT_EQ(tokens.size(), size_t(4), "4 tokens");
+    EXPECT_EQ(tokens[0].normalized, std::string("the"), "token 0");
+    EXPECT_EQ(text.substr(tokens[1].start, tokens[1].length), std::wstring(L"quick"), "token 1 span");
+    EXPECT_EQ(text.substr(tokens[3].start, tokens[3].length), std::wstring(L"fox"), "token 3 span");
+}
+
+static void TestFirstWordFastPathAndSingleWordGuard() {
+    auto model = ScriptModel::BuildUtf8(kFox);
+    ScriptAlignmentEngine matcher(model);
+
+    // Non-expected single word must NOT advance or jump
+    auto u0 = matcher.Process("banana");
+    EXPECT_EQ(u0.tokenIndex, -1, "off-script single word does not advance");
+
+    auto uLazy = matcher.Process("lazy");
+    EXPECT_TRUE(!uLazy.advanced, "single word later in script does not jump");
+    EXPECT_EQ(matcher.CurrentTokenIndex(), -1, "still at -1");
+
+    // Expected first word advances immediately
+    auto u1 = matcher.Process("the");
+    EXPECT_EQ(u1.state, TrackingState::Tracking, "expected first word tracks immediately");
+    EXPECT_EQ(WordAt(model, u1.tokenIndex), std::string("the"), "advanced to 'the'");
+}
+
+static void TestCleanSequentialReadAndPartials() {
+    auto model = ScriptModel::BuildUtf8(kFox);
+    ScriptAlignmentEngine matcher(model);
+
+    int last = -1;
+    const char* prefixes[] = {
+        "the quick brown",
+        "the quick brown fox jumps",
+        "the quick brown fox jumps over the lazy dog"
+    };
+
+    for (const char* p : prefixes) {
+        auto upd = matcher.Process(p);
+        EXPECT_TRUE(upd.tokenIndex >= last, "monotonic progression on partial updates");
+        last = upd.tokenIndex;
+    }
+
+    EXPECT_EQ(matcher.State(), TrackingState::Tracking, "tracking at end");
+    EXPECT_EQ(WordAt(model, matcher.CurrentTokenIndex()), std::string("dog"), "reached end of script");
+}
+
+static void TestPauseHoldsAndFirstWordAfterPauseAdvances() {
+    auto model = ScriptModel::BuildUtf8(kFox);
+    ScriptAlignmentEngine matcher(model);
+
+    FeedGrowing(matcher, "the quick brown fox");
+    int held = matcher.CurrentTokenIndex();
+    EXPECT_EQ(WordAt(model, held), std::string("fox"), "at fox");
+
+    // Pause with filler words
+    matcher.Process("um");
+    auto pausedUpd = matcher.Process("um well");
+    EXPECT_TRUE(!pausedUpd.advanced, "pause does not advance");
+    EXPECT_EQ(matcher.CurrentTokenIndex(), held, "position held during pause");
+    EXPECT_EQ(matcher.State(), TrackingState::Paused, "state is Paused");
+
+    // First expected word after pause advances immediately
+    auto resumedUpd = matcher.Process("jumps");
+    EXPECT_EQ(resumedUpd.state, TrackingState::Tracking, "resumed tracking");
+    EXPECT_EQ(resumedUpd.tokenIndex, held + 1, "advanced to jumps");
+}
+
+static void TestOffScriptAdlibAndRepeatedWords() {
+    auto model = ScriptModel::BuildUtf8(kFox);
+    ScriptAlignmentEngine matcher(model);
+
+    matcher.Process("the quick brown");
+    int beforeAdlib = matcher.CurrentTokenIndex();
+
+    matcher.Process("so anyway let me think about this");
+    EXPECT_EQ(matcher.CurrentTokenIndex(), beforeAdlib, "adlib does not move anchor");
+
+    auto resumed = matcher.Process("brown fox jumps over");
+    EXPECT_EQ(resumed.state, TrackingState::Tracking, "resumed after adlib");
+    EXPECT_TRUE(matcher.CurrentTokenIndex() > beforeAdlib, "advanced after resuming script");
+
+    // Repeated words and ambiguous phrases prefer local continuity
+    auto repModel = ScriptModel::BuildUtf8("the cat and the dog and the bird");
+    ScriptAlignmentEngine repMatcher(repModel);
+    FeedGrowing(repMatcher, "the cat and the dog");
+    EXPECT_EQ(WordAt(repModel, repMatcher.CurrentTokenIndex()), std::string("dog"), "at dog");
+    repMatcher.Process("and the bird");
+    EXPECT_EQ(repMatcher.CurrentTokenIndex(), 7, "matched third 'the' and 'bird'");
+
+    // Repeated partials at the current anchor and 2-word matches further ahead must NOT skip lines
+    auto multiLine = ScriptModel::BuildUtf8(
+        "welcome to virtual overlay for windows. "
+        "this presenter follows your speaking pace smoothly. "
+        "you can also scroll or jump to any line."
+    );
+    ScriptAlignmentEngine antiSkip(multiLine);
+    antiSkip.Process("welcome to virtual");
+    EXPECT_EQ(antiSkip.CurrentTokenIndex(), 2, "at 'virtual' (token 2)");
+    // Repeated partial at the same position must hold at token 2 and not ratchet forward
+    for (int i = 0; i < 6; ++i) {
+        antiSkip.Process("welcome to virtual");
+    }
+    EXPECT_EQ(antiSkip.CurrentTokenIndex(), 2, "repeated identical partial holds at token 2 without skipping");
+    // A 2-word partial matching words on line 3 ("to any") must not jump ahead from token 2
+    antiSkip.Process("to any");
+    EXPECT_EQ(antiSkip.CurrentTokenIndex(), 2, "2-word match far ahead does not jump lines");
+}
+
+static void TestSkipAheadAndBackwardRecovery() {
+    static const char* kDistinctWords[40] = {
+        "apple", "banana", "cherry", "dragon", "emerald",
+        "falcon", "glacier", "harbor", "island", "jungle",
+        "lantern", "meadow", "nebula", "orchard", "pioneer",
+        "quartz", "river", "summit", "tempest", "umbrella",
+        "valley", "whisper", "xenon", "yonder", "zephyr",
+        "anchor", "beacon", "compass", "dolphin", "eclipse",
+        "fortress", "granite", "horizon", "ivory", "jasper",
+        "kingdom", "legend", "monarch", "navigator", "odyssey"
+    };
+    std::string script40;
+    for (int i = 0; i < 40; ++i) {
+        if (i > 0) script40 += " ";
+        script40 += kDistinctWords[i];
+    }
+    auto model40 = ScriptModel::BuildUtf8(script40);
+    ScriptAlignmentEngine matcher40(model40);
+
+    matcher40.Process("apple banana cherry dragon emerald");
+    EXPECT_EQ(matcher40.CurrentTokenIndex(), 4, "at emerald (token 4)");
+
+    MatchUpdate skipUpd{};
+    for (int i = 0; i < 8; ++i) {
+        skipUpd = matcher40.Process("anchor beacon compass");
+        if (skipUpd.state == TrackingState::Tracking && matcher40.CurrentTokenIndex() >= 25) {
+            break;
+        }
+    }
+    EXPECT_EQ(skipUpd.state, TrackingState::Tracking, "reacquired after skipping ahead");
+    EXPECT_TRUE(matcher40.CurrentTokenIndex() >= 25 && matcher40.CurrentTokenIndex() <= 27, "jumped to anchor..compass (25..27)");
+
+    // Backward re-read recovery vs short echo guard
+    const char* threeSentences =
+        "alpha bravo charlie delta echo. "
+        "foxtrot golf hotel india juliet. "
+        "kilo lima mike november oscar.";
+    auto model3 = ScriptModel::BuildUtf8(threeSentences);
+    ScriptAlignmentEngine matcher3(model3);
+
+    FeedGrowing(matcher3, "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar");
+    int atEnd = matcher3.CurrentTokenIndex();
+    EXPECT_EQ(WordAt(model3, atEnd), std::string("oscar"), "at oscar");
+
+    // Short 2-word backward echo must NOT rewind
+    for (int i = 0; i < 12; ++i) {
+        matcher3.Process("alpha bravo");
+    }
+    EXPECT_EQ(matcher3.CurrentTokenIndex(), atEnd, "2-word echo did not rewind");
+
+    // Full sentence retake re-acquires backward
+    MatchUpdate backUpd{};
+    for (int r = 0; r < 3; ++r) {
+        backUpd = FeedGrowing(matcher3, "alpha bravo charlie delta echo");
+    }
+    EXPECT_EQ(backUpd.state, TrackingState::Tracking, "backward retake reacquired");
+    EXPECT_EQ(WordAt(model3, backUpd.tokenIndex), std::string("echo"), "aligned to echo");
+}
+
+static void TestNumbersSeekResetAndSmoothDamp() {
+    auto numModel = ScriptModel::BuildUtf8("we raised 25 million dollars last year");
+    ScriptAlignmentEngine numMatcher(numModel);
+    numMatcher.Process("we raised twenty five million");
+    EXPECT_EQ(WordAt(numModel, numMatcher.CurrentTokenIndex()), std::string("million"), "matched expanded 25");
+
+    // SeekToToken & Reset
+    auto foxModel = ScriptModel::BuildUtf8(kFox);
+    ScriptAlignmentEngine foxMatcher(foxModel);
+    foxMatcher.SeekToToken(4);
+    EXPECT_EQ(WordAt(foxModel, foxMatcher.CurrentTokenIndex()), std::string("jumps"), "seek to token 4 (jumps)");
+    foxMatcher.Reset();
+    EXPECT_EQ(foxMatcher.CurrentTokenIndex(), -1, "reset token index to -1");
+    EXPECT_EQ(foxMatcher.State(), TrackingState::Idle, "reset state to Idle");
+
+    // SmoothDamp convergence without overshoot
+    double pos = 0.0;
+    double vel = 0.0;
+    const double target = 120.0;
+    for (int step = 0; step < 120; ++step) {
+        double next = SmoothDamp::Step(pos, target, vel, 0.25, 1.0 / 60.0);
+        EXPECT_TRUE(next >= pos && next <= target + 1e-6, "SmoothDamp monotonic without overshoot");
+        pos = next;
+    }
+    EXPECT_TRUE(std::fabs(pos - target) < 0.5, "SmoothDamp converged to target");
+}
+
+// =============================================================================
+// 2. Audio & Offline Speech Recognizer Tests
+// =============================================================================
+
+static void TestAudioResamplerAndChannelSelection() {
+    // Generate 480 frames (10 ms at 48 kHz) of stereo Float32:
+    // Channel 1 (Left) = +0.5f, Channel 2 (Right) = -0.25f
+    const size_t frames = 480;
+    std::vector<float> stereo(frames * 2);
+    for (size_t i = 0; i < frames; ++i) {
+        stereo[2 * i] = 0.50f;
+        stereo[2 * i + 1] = -0.25f;
+    }
+
+    std::vector<float> mono;
+    float peak = 0.0f;
+
+    // Channel 0 = Mono mixdown: (0.50 - 0.25) / 2 = 0.125
+    AudioResampler::ConvertToMonoFloat(
+        reinterpret_cast<const uint8_t*>(stereo.data()),
+        frames, 2, AudioSampleFormat::Float32, 0, mono, peak);
+    EXPECT_EQ(mono.size(), frames, "mono mixdown frame count");
+    EXPECT_TRUE(std::fabs(mono[0] - 0.125f) < 1e-4f, "mono mixdown value");
+    EXPECT_TRUE(std::fabs(peak - 0.125f) < 1e-4f, "mono mixdown peak");
+
+    // Channel 1 = Left only (0.50)
+    AudioResampler::ConvertToMonoFloat(
+        reinterpret_cast<const uint8_t*>(stereo.data()),
+        frames, 2, AudioSampleFormat::Float32, 1, mono, peak);
+    EXPECT_TRUE(std::fabs(mono[0] - 0.50f) < 1e-4f, "channel 1 value");
+    EXPECT_TRUE(std::fabs(peak - 0.50f) < 1e-4f, "channel 1 peak");
+
+    // Channel 2 = Right only (-0.25)
+    AudioResampler::ConvertToMonoFloat(
+        reinterpret_cast<const uint8_t*>(stereo.data()),
+        frames, 2, AudioSampleFormat::Float32, 2, mono, peak);
+    EXPECT_TRUE(std::fabs(mono[0] - (-0.25f)) < 1e-4f, "channel 2 value");
+    EXPECT_TRUE(std::fabs(peak - 0.25f) < 1e-4f, "channel 2 peak");
+
+    // Resample 48,000 Hz -> 16,000 Hz (3:1 ratio: 480 samples -> 160 samples)
+    AudioResampler resampler;
+    std::vector<int16_t> pcm16;
+    resampler.ResampleTo16kPcm16(mono.data(), mono.size(), 48000, pcm16);
+    EXPECT_EQ(pcm16.size(), size_t(160), "48kHz -> 16kHz produces 160 samples from 480");
+    EXPECT_TRUE(pcm16[10] < -8000 && pcm16[10] > -8300, "PCM16 amplitude matches -0.25 * 32767");
+}
+
+static void TestAudioDeviceEnumerationAndMissingDeviceHandling() {
+    AudioInputManager::Instance().Init();
+    auto devices = AudioInputManager::Instance().EnumerateCaptureDevices();
+    EXPECT_TRUE(!devices.empty(), "at least 'default' capture endpoint returned");
+    EXPECT_EQ(devices[0].id, std::wstring(L"default"), "first entry is 'default'");
+
+    // Test missing/unavailable device handling without silently switching devices
+    AudioInputManager::Instance().SetSelectedDevice(L"{0.0.1.00000000}.{deadbeef-0000-0000-0000-000000000000}", L"Unplugged Test Mic", 1);
+    AudioInputManager::Instance().StartCapture();
+    Sleep(150);
+    EXPECT_EQ(AudioInputManager::Instance().GetState(), AudioCaptureState::DeviceUnavailable,
+              "non-existent explicit device reports DeviceUnavailable without switching");
+    EXPECT_EQ(AudioInputManager::Instance().GetSelectedDeviceId(),
+              std::wstring(L"{0.0.1.00000000}.{deadbeef-0000-0000-0000-000000000000}"),
+              "selected device ID preserved while unavailable");
+    AudioInputManager::Instance().StopCapture();
+    AudioInputManager::Instance().SetSelectedDevice(L"default", L"", 0);
+}
+
+static void TestVoskGrammarAndModelValidation() {
+    std::string grm = OfflineSpeechRecognizer::BuildGrammarJson({ "hello", "world", "hello", "größe" });
+    EXPECT_TRUE(!grm.empty(), "grammar built for small vocabulary");
+    EXPECT_TRUE(grm.find("\\u") == std::string::npos, "no \\u escapes in Vosk grammar");
+    EXPECT_TRUE(grm.find("\"größe\"") != std::string::npos, "contains literal UTF-8 word");
+    EXPECT_TRUE(grm.find("\"[unk]\"") != std::string::npos, "contains [unk]");
+
+    // Exceeding 1200 distinct words returns empty string (open vocabulary fallback)
+    std::vector<std::string> hugeVocab;
+    for (int i = 0; i <= 1205; ++i) {
+        hugeVocab.push_back("word" + std::to_string(i));
+    }
+    EXPECT_TRUE(OfflineSpeechRecognizer::BuildGrammarJson(hugeVocab).empty(),
+                "vocab > 1200 returns empty grammar for open-vocab fallback");
+
+    // ExtractFieldFromVoskJson strips [unk]
+    std::string partial = OfflineSpeechRecognizer::ExtractFieldFromVoskJson(
+        "{\"partial\" : \"the quick [unk] brown\"}", "partial");
+    EXPECT_EQ(partial, std::string("the quick brown"), "strips [unk] from partial JSON");
+
+    // Model folder validation
+    fs::path tempModel = fs::temp_directory_path() / L"vo_test_vosk_model";
+    fs::remove_all(tempModel);
+    fs::create_directories(tempModel / "am");
+    fs::create_directories(tempModel / "conf");
+    fs::create_directories(tempModel / "graph");
+    EXPECT_TRUE(!OfflineSpeechRecognizer::IsValidVoskModelDirectory(tempModel.wstring()),
+                "incomplete model folder rejected");
+
+    std::ofstream(tempModel / "am" / "final.mdl").put('x');
+    std::ofstream(tempModel / "conf" / "mfcc.conf").put('x');
+    std::ofstream(tempModel / "graph" / "HCLG.fst").put('x');
+    EXPECT_TRUE(OfflineSpeechRecognizer::IsValidVoskModelDirectory(tempModel.wstring()),
+                "complete Vosk model folder accepted");
+    fs::remove_all(tempModel);
+}
+
+// =============================================================================
+// 3. Presenter Integration & Persistence Tests
+// =============================================================================
+
+static void TestConfigPersistenceRoundTrip() {
+    fs::path tmpCfg = fs::temp_directory_path() / L"vo_presenter_test_config.json";
+    fs::remove(tmpCfg);
+
+    auto& cfg = Config::Instance();
+    cfg.Reset();
+    auto& mut = cfg.GetMutable().presenter;
+    mut.enabled = true;
+    mut.fontSize = 40;
+    mut.captionWidth = 960;
+    mut.audioDeviceId = L"{0.0.1.00000000}.{test-mic-guid}";
+    mut.audioDeviceName = L"Maono PD200X";
+    mut.audioChannel = 2;
+    mut.scriptText = L"Line one of script.\nLine two of script.";
+    mut.savedTokenIndex = 3;
+    mut.monitorAnchors[L"MNN"] = PresenterMonitorAnchor{ 0.48f, 0.12f };
+    mut.monitorAnchors[L"PRIMARY"] = PresenterMonitorAnchor{ 0.52f, 0.18f };
+
+    EXPECT_TRUE(cfg.Save(tmpCfg.wstring()), "save presenter config");
+
+    cfg.Reset();
+    EXPECT_TRUE(cfg.Load(tmpCfg.wstring()), "load presenter config");
+
+    const auto& loaded = cfg.Get().presenter;
+    EXPECT_EQ(loaded.enabled, true, "enabled persisted");
+    EXPECT_EQ(loaded.fontSize, 40, "fontSize persisted");
+    EXPECT_EQ(loaded.captionWidth, 960, "captionWidth persisted");
+    EXPECT_EQ(loaded.audioDeviceId, std::wstring(L"{0.0.1.00000000}.{test-mic-guid}"), "audioDeviceId persisted");
+    EXPECT_EQ(loaded.audioDeviceName, std::wstring(L"Maono PD200X"), "audioDeviceName persisted");
+    EXPECT_EQ(loaded.audioChannel, 2, "audioChannel persisted");
+    EXPECT_EQ(loaded.savedTokenIndex, 3, "savedTokenIndex persisted");
+    EXPECT_EQ(loaded.monitorAnchors.size(), size_t(2), "2 monitor anchors persisted");
+    EXPECT_TRUE(std::fabs(loaded.monitorAnchors.at(L"MNN").normY - 0.12f) < 1e-4f, "MNN normY persisted");
+    EXPECT_TRUE(std::fabs(loaded.monitorAnchors.at(L"PRIMARY").normY - 0.18f) < 1e-4f, "PRIMARY normY persisted");
+
+    fs::remove(tmpCfg);
+    fs::remove(fs::path(tmpCfg.wstring() + L".bak"));
+}
+
+static void TestPresenterWindowAndControllerIntegration() {
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+    D2DRenderer::Instance().Init();
+    Monitor::Instance().Refresh();
+
+    PresenterWindow win;
+    EXPECT_TRUE(win.Init(hInst), "PresenterWindow Init");
+
+    PresenterConfig cfg;
+    cfg.fontSize = 28;
+    cfg.captionWidth = 700;
+    cfg.previousLines = 1;
+    cfg.upcomingLines = 2;
+
+    std::wstring multiLineScript =
+        L"First line of the teleprompter presentation script.\n"
+        L"Second line advances automatically as you speak.\n"
+        L"Third line stays ready below the fixed reading line.\n"
+        L"Fourth line concludes the demonstration.";
+
+    ScriptModel model = ScriptModel::Build(multiLineScript, true);
+    win.ApplyConfig(cfg);
+    win.SetScriptModel(model, -1);
+
+    EXPECT_TRUE(win.GetLineCount() >= 4, "script wrapped into >= 4 lines");
+    EXPECT_EQ(win.GetActiveLineIndex(), 0, "starts on line 0");
+
+    // Simulate speech recognition advancing into the second line
+    ScriptAlignmentEngine engine(model);
+    auto upd1 = engine.Process("first line of the teleprompter presentation script");
+    win.SetActiveToken(upd1.tokenIndex, upd1.state, true);
+    EXPECT_EQ(win.GetActiveLineIndex(), 0, "still on line 0 at end of first line");
+
+    auto upd2 = engine.Process("second line advances automatically");
+    win.SetActiveToken(upd2.tokenIndex, upd2.state, true);
+    EXPECT_TRUE(win.GetActiveLineIndex() >= 1, "advanced to line 1+");
+
+    // Manual line selection updates alignment anchor
+    int line2FirstTok = win.GetFirstTokenForLine(2);
+    EXPECT_TRUE(line2FirstTok > 0, "line 2 has valid first token");
+    engine.SeekToToken(line2FirstTok);
+    win.SetActiveToken(engine.CurrentTokenIndex(), engine.State(), true);
+    EXPECT_EQ(win.GetActiveLineIndex(), 2, "manual seek to line 2 updated active line");
+
+    // Verify bullet formatting, line breaks, and paragraph breaks
+    ScriptModel bulletModel = ScriptModel::Build(
+        L"Introductory sentence before bullets:\n"
+        L"- First bullet item.\n"
+        L"- Second bullet item.\n\n"
+        L"Closing paragraph after a blank line.",
+        true
+    );
+    win.SetScriptModel(bulletModel, -1);
+    auto previews = win.GetLinePreviews();
+    EXPECT_EQ(previews.size(), size_t(4), "4 non-blank visual lines for intro + 2 bullets + closing paragraph");
+    EXPECT_TRUE(previews[1].find(L"\u2022 First bullet item.") == 0, "bullet 1 prefixed with bullet symbol");
+    EXPECT_TRUE(previews[2].find(L"\u2022 Second bullet item.") == 0, "bullet 2 prefixed with bullet symbol");
+
+    // Verify fixed reading-baseline screen Y invariance across fontSize, captionWidth, and script changes
+    win.Show();
+    RECT rcBefore{};
+    GetWindowRect(win.GetHwnd(), &rcBefore);
+    int baselineScreenYBefore = rcBefore.top + static_cast<int>(std::round(win.GetReadingBaselineLocalY()));
+
+    cfg.fontSize = 44;
+    cfg.captionWidth = 960;
+    win.ApplyConfig(cfg);
+    RECT rcAfterFont{};
+    GetWindowRect(win.GetHwnd(), &rcAfterFont);
+    int baselineScreenYAfterFont = rcAfterFont.top + static_cast<int>(std::round(win.GetReadingBaselineLocalY()));
+    EXPECT_EQ(baselineScreenYAfterFont, baselineScreenYBefore,
+              "reading baseline screen Y invariant when fontSize and captionWidth change");
+
+    ScriptModel anotherModel = ScriptModel::Build(L"A completely different short script.", true);
+    win.SetScriptModel(anotherModel, -1);
+    RECT rcAfterScript{};
+    GetWindowRect(win.GetHwnd(), &rcAfterScript);
+    int baselineScreenYAfterScript = rcAfterScript.top + static_cast<int>(std::round(win.GetReadingBaselineLocalY()));
+    EXPECT_EQ(baselineScreenYAfterScript, baselineScreenYBefore,
+              "reading baseline screen Y invariant when script content changes");
+
+    // Verify passive click-through and no-activate styles on HWND
+    LONG_PTR exStyle = GetWindowLongPtrW(win.GetHwnd(), GWL_EXSTYLE);
+    EXPECT_TRUE((exStyle & WS_EX_LAYERED) != 0, "WS_EX_LAYERED set");
+    EXPECT_TRUE((exStyle & WS_EX_NOACTIVATE) != 0, "WS_EX_NOACTIVATE set");
+    EXPECT_TRUE((exStyle & WS_EX_TRANSPARENT) != 0, "WS_EX_TRANSPARENT set in passive mode");
+
+    win.Shutdown();
+}
+
+static void TestVoskDllAndPresenterControllerLifecycle() {
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+    auto& ctrl = PresenterController::Instance();
+    EXPECT_TRUE(ctrl.Init(hInst, nullptr), "PresenterController Init");
+
+    // Load UTF-8 markdown script file
+    fs::path tmpMd = fs::temp_directory_path() / L"vo_test_script.md";
+    {
+        std::ofstream out(tmpMd, std::ios::binary);
+        out << "Welcome to Virtual Overlay native presenter.\n"
+            << "This second line tests file loading and close recovery.\n"
+            << "This third line tests position preservation.\n";
+    }
+    EXPECT_TRUE(ctrl.LoadScriptFromFile(tmpMd.wstring()), "LoadScriptFromFile UTF-8 .md");
+    fs::remove(tmpMd);
+
+    // Seek to token 7 and open presenter
+    ctrl.SeekToToken(7);
+    EXPECT_EQ(ctrl.GetCurrentTokenIndex(), 7, "SeekToToken(7)");
+    ctrl.Open();
+    EXPECT_EQ(ctrl.IsOpen(), true, "presenter visible after Open()");
+
+    // Pause / Resume toggle
+    EXPECT_EQ(ctrl.IsPaused(), false, "initially not paused");
+    ctrl.TogglePause();
+    EXPECT_EQ(ctrl.IsPaused(), true, "paused after TogglePause");
+    // While paused, hypotheses do not advance the script
+    ctrl.ProcessHypothesisForTest("this third line tests position preservation", false);
+    EXPECT_EQ(ctrl.GetCurrentTokenIndex(), 7, "paused presenter ignores speech hypotheses");
+
+    ctrl.TogglePause();
+    EXPECT_EQ(ctrl.IsPaused(), false, "resumed after second TogglePause");
+    // Once resumed, hypotheses advance the script
+    ctrl.ProcessHypothesisForTest("second line tests file loading and close recovery", false);
+    EXPECT_TRUE(ctrl.GetCurrentTokenIndex() > 7, "resumed presenter advances on speech hypothesis");
+    int savedTok = ctrl.GetCurrentTokenIndex();
+
+    // Close presenter: stops audio capture, releases recognizer, preserves script & token position
+    ctrl.Close();
+    EXPECT_EQ(ctrl.IsOpen(), false, "presenter hidden after Close()");
+    EXPECT_EQ(AudioInputManager::Instance().GetState(), AudioCaptureState::Stopped,
+              "audio capture stopped on Close()");
+    EXPECT_EQ(ctrl.GetRecognizerStatus(), RecognizerStatus::Uninitialized,
+              "speech recognizer released on Close()");
+    EXPECT_EQ(ctrl.GetCurrentTokenIndex(), savedTok, "reading position preserved on Close()");
+
+    // Reopen presenter: restores script and preserved reading position
+    ctrl.Open();
+    EXPECT_EQ(ctrl.IsOpen(), true, "presenter reopened via Open()");
+    EXPECT_EQ(ctrl.GetCurrentTokenIndex(), savedTok, "reading position restored on reopen");
+    ctrl.Close();
+
+    ctrl.Shutdown();
+}
+
+int main() {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    std::printf("=== Virtual Overlay Presenter Test Suite ===\n");
+
+    RunTest("NumberExpander cardinal expansion", TestNumberExpander);
+    RunTest("TextNormalizer punctuation, numbers, and spans", TestTextNormalizer);
+    RunTest("ScriptAlignmentEngine first-word fast path & single-word guard", TestFirstWordFastPathAndSingleWordGuard);
+    RunTest("ScriptAlignmentEngine sequential reading & partial hypotheses", TestCleanSequentialReadAndPartials);
+    RunTest("ScriptAlignmentEngine pause holds & resume advances", TestPauseHoldsAndFirstWordAfterPauseAdvances);
+    RunTest("ScriptAlignmentEngine off-script adlib & repeated words", TestOffScriptAdlibAndRepeatedWords);
+    RunTest("ScriptAlignmentEngine skip-ahead & backward retake recovery", TestSkipAheadAndBackwardRecovery);
+    RunTest("ScriptAlignmentEngine numbers, SeekToToken, Reset & SmoothDamp", TestNumbersSeekResetAndSmoothDamp);
+    RunTest("AudioResampler format, channel selection & 48k->16k resampling", TestAudioResamplerAndChannelSelection);
+    RunTest("AudioInputManager enumeration & unavailable device handling", TestAudioDeviceEnumerationAndMissingDeviceHandling);
+    RunTest("OfflineSpeechRecognizer grammar builder & model validation", TestVoskGrammarAndModelValidation);
+    RunTest("Config presenter & per-monitor anchor persistence round-trip", TestConfigPersistenceRoundTrip);
+    RunTest("PresenterWindow layout, speech advancement & manual line seek", TestPresenterWindowAndControllerIntegration);
+    RunTest("Vosk DLL loading & PresenterController close/reopen lifecycle", TestVoskDllAndPresenterControllerLifecycle);
+
+    std::printf("============================================\n");
+    std::printf("Passed: %d | Failed: %d\n", g_passed, g_failed);
+
+    CoUninitialize();
+    return (g_failed == 0) ? 0 : 1;
+}

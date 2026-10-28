@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(virtual-overlay VERSION 1.1.0 LANGUAGES CXX)
+project(virtual-overlay VERSION 1.2.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Static CRT - no runtime DLL dependency
@@ -13,14 +13,17 @@ file(GLOB_RECURSE SOURCES
     src/*.h
 )
 
+# Separate main.cpp so test executable can link core sources
+set(CORE_SOURCES ${SOURCES})
+list(FILTER CORE_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
+
 # Win32 GUI application
 add_executable(virtual-overlay WIN32
     ${SOURCES}
     res/app.rc
 )
 
-# Link Windows SDK libraries
-target_link_libraries(virtual-overlay PRIVATE
+set(COMMON_LIBS
     d2d1.lib
     dwrite.lib
     dwmapi.lib
@@ -35,9 +38,13 @@ target_link_libraries(virtual-overlay PRIVATE
     user32.lib
     gdi32.lib
     comctl32.lib
+    comdlg32.lib
     shlwapi.lib
     runtimeobject.lib
 )
+
+# Link Windows SDK libraries
+target_link_libraries(virtual-overlay PRIVATE ${COMMON_LIBS})
 
 # Compile definitions
 target_compile_definitions(virtual-overlay PRIVATE
@@ -45,6 +52,8 @@ target_compile_definitions(virtual-overlay PRIVATE
     _UNICODE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
+    _WIN32_WINNT=0x0A00
+    WINVER=0x0A00
 )
 
 # Include directories
@@ -76,8 +85,24 @@ if(MSVC)
     target_link_options(virtual-overlay PRIVATE /MANIFESTUAC:NO)
 endif()
 
-# Windows version targeting (Windows 10 1803+)
-target_compile_definitions(virtual-overlay PRIVATE
+# Deterministic unit & integration test runner
+add_executable(virtual-overlay-tests
+    tests/PresenterTests.cpp
+    ${CORE_SOURCES}
+)
+
+target_link_libraries(virtual-overlay-tests PRIVATE ${COMMON_LIBS})
+
+target_compile_definitions(virtual-overlay-tests PRIVATE
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
     _WIN32_WINNT=0x0A00
     WINVER=0x0A00
+)
+
+target_include_directories(virtual-overlay-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/lib
+    ${CMAKE_SOURCE_DIR}/src
 )

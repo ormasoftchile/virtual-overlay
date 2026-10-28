@@ -631,3 +631,13 @@ void FlipManager::OnCursorTimer() {
 }
 
 }  // namespace VirtualOverlay
+
+namespace VirtualOverlay {
+void FlipManager::RaiseMirrorsToTop() {
+    for (const auto& [id, mirror] : m_windows) {
+        if (mirror && mirror->IsValid()) {
+            mirror->RaiseToTop();
+        }
+    }
+}
+}  // namespace VirtualOverlay
