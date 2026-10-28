@@ -4,8 +4,40 @@ project(virtual-overlay VERSION 1.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Static CRT - no runtime DLL dependency
+# Static MSVC CRT; Vosk ships its own runtime DLLs.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+FetchContent_Declare(vosk_runtime
+    URL https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
+    URL_HASH SHA256=f1dcc9cca460630f81ea8f71794f69c80bed6556d2a4e6237b5785e1d2dff34b
+    DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/downloads"
+    TLS_VERIFY TRUE
+)
+FetchContent_MakeAvailable(vosk_runtime)
+
+set(VOSK_RUNTIME_FILES
+    "${vosk_runtime_SOURCE_DIR}/libvosk.dll"
+    "${vosk_runtime_SOURCE_DIR}/libgcc_s_seh-1.dll"
+    "${vosk_runtime_SOURCE_DIR}/libstdc++-6.dll"
+    "${vosk_runtime_SOURCE_DIR}/libwinpthread-1.dll"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.vosk.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.gcc.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.gcc-runtime.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.winpthreads.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.kaldi.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.openfst.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.openblas.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.gotoblas.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.clapack.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.f2c.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/LICENSE.mingw-runtime.txt"
+    "${CMAKE_SOURCE_DIR}/lib/vosk/SOURCES.vosk.txt"
+    "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+)
 
 # Collect source files
 file(GLOB_RECURSE SOURCES
@@ -106,3 +138,23 @@ target_include_directories(virtual-overlay-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/lib
     ${CMAKE_SOURCE_DIR}/src
 )
+
+# Both executables share the configuration's output directory.
+add_custom_target(vosk-runtime
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:virtual-overlay>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${VOSK_RUNTIME_FILES} "$<TARGET_FILE_DIR:virtual-overlay>"
+    VERBATIM
+)
+add_dependencies(virtual-overlay vosk-runtime)
+add_dependencies(virtual-overlay-tests vosk-runtime)
+
+add_custom_command(TARGET virtual-overlay-tests POST_BUILD
+    COMMAND "$<TARGET_FILE:virtual-overlay-tests>" --vosk-runtime-only
+    COMMENT "Checking bundled Vosk runtime"
+    VERBATIM
+)
+
+enable_testing()
+add_test(NAME vosk-runtime COMMAND virtual-overlay-tests --vosk-runtime-only)
+add_test(NAME presenter COMMAND virtual-overlay-tests)

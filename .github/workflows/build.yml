@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     
     steps:
     - name: Checkout
@@ -41,6 +41,12 @@ jobs:
         name: VirtualOverlay-Installer
         path: installer/VirtualOverlay.msi
 
+    - name: Upload Runtime Source Information
+      uses: actions/upload-artifact@v4
+      with:
+        name: Vosk-Source-Information
+        path: lib/vosk/SOURCES.vosk.txt
+
   release:
     needs: build
     runs-on: windows-latest
@@ -55,9 +61,19 @@ jobs:
       with:
         name: VirtualOverlay-Installer
 
+    - name: Download Runtime Source Information
+      uses: actions/download-artifact@v4
+      with:
+        name: Vosk-Source-Information
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
           VirtualOverlay.msi
+          SOURCES.vosk.txt
+        body: |
+          The installer includes third-party runtime licenses and notices.
+          Read the attached SOURCES.vosk.txt for corresponding GNU runtime source
+          downloads, build scripts, and Vosk dependency attribution.
         generate_release_notes: true

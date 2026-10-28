@@ -1,0 +1,111 @@
+Vosk runtime: source access and license provenance
+================================================
+
+Vosk 0.3.45 Windows x64 is redistributed without changes to its four DLLs.
+The reduced vosk_api.h used by Virtual Overlay is separately marked as modified.
+See THIRD_PARTY_NOTICES.md and the accompanying LICENSE.*.txt files.
+
+Runtime archive:
+https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
+SHA-256: f1dcc9cca460630f81ea8f71794f69c80bed6556d2a4e6237b5785e1d2dff34b
+
+Vosk source and Windows build/link recipes:
+https://github.com/alphacep/vosk-api/tree/v0.3.45
+https://github.com/alphacep/vosk-api/blob/v0.3.45/travis/Dockerfile.win
+https://github.com/alphacep/vosk-api/blob/v0.3.45/travis/build-wheels-win.sh
+https://github.com/alphacep/vosk-api/blob/v0.3.45/src/Makefile
+
+GNU runtime corresponding source
+-------------------------------
+
+The following DLLs were verified by SHA-256 to be identical to files in the
+Debian amd64 binary package:
+https://deb.debian.org/debian/pool/main/g/gcc-mingw-w64/gcc-mingw-w64-x86-64-posix-runtime_10.2.1-6+24.2_amd64.deb
+
+libgcc_s_seh-1.dll
+SHA-256: 201bf8a54ebb490f93ea4beb20740a483bf67036b90b5720f32d0c746a72d1e9
+libstdc++-6.dll
+SHA-256: a1d96a848a567d7657e152cfe92e2fd62da412968cc11ec8bdb04bf20ebc5747
+
+Copyright Free Software Foundation, Inc.
+License: GPL-3.0-or-later WITH GCC-exception-3.1.
+Full texts: LICENSE.gcc.txt and LICENSE.gcc-runtime.txt.
+
+The corresponding source and cross-build scripts are available without charge
+from Debian at these direct locations. Source metadata (.dsc files) records
+the archive checksums and build dependencies.
+
+GCC 10.2.1-6 source metadata:
+https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1-6.dsc
+
+GCC upstream source:
+https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1.orig.tar.xz
+SHA-256: ea3c05faa381486e6b859c047dc14977418bf1ccda4567064e016493fd6fffec
+
+Debian GCC patches and packaging:
+https://deb.debian.org/debian/pool/main/g/gcc-10/gcc-10_10.2.1-6.debian.tar.xz
+SHA-256: a95d6b9da2be83f9751850b002021281411ff1003d9feb77298b131da47820b3
+
+Debian MinGW cross-build source metadata:
+https://deb.debian.org/debian/pool/main/g/gcc-mingw-w64/gcc-mingw-w64_24.2.dsc
+
+Debian MinGW cross-build scripts, patches, and build rules:
+https://deb.debian.org/debian/pool/main/g/gcc-mingw-w64/gcc-mingw-w64_24.2.tar.xz
+SHA-256: b44f6a0980c5f704d0b00277f8fdb4051ed618b1e02a06cfd88515a360628a01
+
+Use the Debian bullseye source packages gcc-10=10.2.1-6 and
+gcc-mingw-w64=24.2. The latter builds using gcc-10-source and the MinGW
+development headers; its debian/rules file contains the build/install steps.
+The GNU runtime exception does not remove source-access obligations when
+redistributing a runtime library independently.
+
+Other embedded components and notice provenance
+-----------------------------------------------
+
+The release recipe selects the versions below. Kaldi and OpenFST were fetched
+from moving branches, so their exact binary-build revisions were not recorded
+by the upstream recipe. Their notices below are from the last branch commits
+before the Vosk 0.3.45 release, not a claim of exact build revisions.
+
+Kaldi (vosk-android branch):
+https://github.com/alphacep/kaldi/tree/b692077807b4832cb4e1a8dd0889ed5f0a71b5b8
+Notice: COPYING -> LICENSE.kaldi.txt
+
+OpenFST:
+https://github.com/alphacep/openfst/tree/7dfd808194105162f20084bb4d8e4ee4b65266d5
+Notice: COPYING -> LICENSE.openfst.txt
+
+OpenBLAS 0.3.20:
+https://github.com/OpenMathLib/OpenBLAS/tree/v0.3.20
+Notices: LICENSE -> LICENSE.openblas.txt
+         GotoBLAS_00License.txt -> LICENSE.gotoblas.txt
+
+CLAPACK 3.2.1 and libf2c:
+https://github.com/alphacep/clapack/tree/v3.2.1
+Notices: COPYING -> LICENSE.clapack.txt
+         F2CLIBS/libf2c/Notice -> LICENSE.f2c.txt
+
+MinGW-w64 runtime:
+https://github.com/mingw-w64/mingw-w64/tree/v8.0.0
+Notices: COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt
+           -> LICENSE.mingw-runtime.txt
+         mingw-w64-libraries/winpthreads/COPYING -> LICENSE.winpthreads.txt
+
+SimpleJSON:
+https://github.com/alphacep/vosk-api/blob/v0.3.45/src/json.h
+Notice: its original license declaration is reproduced in THIRD_PARTY_NOTICES.md.
+
+Speech models are not bundled. Consult https://alphacephei.com/vosk/models
+for the separate license of each model.
+
+For redistributors
+-----------------
+
+Keep all license and notice files with the DLLs. Make this source-access file
+available alongside each installer/portable download, without requiring an
+installation to read it. GPLv3 section 6(d) allows corresponding source on
+another server when recipients are given clear directions and equivalent
+access. Maintain availability of the matching source for as long as you offer
+the binaries; archive/mirror the listed source if these URLs stop working.
+Do not substitute a generic GCC home page for the matching source archives.
+No new written source offer on behalf of Virtual Overlay is made by this file.

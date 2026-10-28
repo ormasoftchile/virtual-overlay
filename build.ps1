@@ -39,6 +39,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ExePath = "build\$Config\virtual-overlay.exe"
 $MsiPath = "installer\VirtualOverlay.msi"
+$VoskSourcesPath = "installer\SOURCES.vosk.txt"
  
 # =============================================================================
 # Tool discovery
@@ -198,7 +199,9 @@ if (-not $SkipInstaller) {
     $wixExit = $LASTEXITCODE
     Pop-Location
     if ($wixExit -ne 0) { Write-Error "WiX build failed"; exit $wixExit }
+    Copy-Item -LiteralPath "build\$Config\SOURCES.vosk.txt" -Destination $VoskSourcesPath
     Write-Host "MSI: $MsiPath" -ForegroundColor Green
+    Write-Host "Runtime source information: $VoskSourcesPath" -ForegroundColor Green
  
     # Sign MSI
     Sign-And-Verify $MsiPath
@@ -211,4 +214,5 @@ if (-not $SkipInstaller) {
 Write-Host "`n=== Done ===" -ForegroundColor Green
 Write-Host "  EXE: $ExePath"
 if (-not $SkipInstaller -and (Test-Path $MsiPath)) { Write-Host "  MSI: $MsiPath" }
+if (-not $SkipInstaller) { Write-Host "  Runtime source information: $VoskSourcesPath" }
 if ($SkipSign) { Write-Host "  (unsigned)" -ForegroundColor Yellow }

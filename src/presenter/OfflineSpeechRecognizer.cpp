@@ -265,6 +265,9 @@ bool OfflineSpeechRecognizer::EnsureVoskDllLoaded() {
                 LOG_INFO("Loaded libvosk.dll from '%ws'", dllPath.wstring().c_str());
                 break;
             }
+            DWORD error = GetLastError();
+            LOG_WARN("OfflineSpeechRecognizer: failed to load '%ws' (Windows error %lu)",
+                     dllPath.wstring().c_str(), error);
         }
     }
 
@@ -273,7 +276,8 @@ bool OfflineSpeechRecognizer::EnsureVoskDllLoaded() {
     }
 
     if (!hMod) {
-        LOG_WARN("OfflineSpeechRecognizer: libvosk.dll not found");
+        LOG_WARN("OfflineSpeechRecognizer: libvosk.dll could not be loaded (Windows error %lu)",
+                 GetLastError());
         return false;
     }
 
@@ -369,7 +373,7 @@ bool OfflineSpeechRecognizer::Start(const std::vector<std::string>& scriptVocabu
 
     if (!EnsureVoskDllLoaded()) {
         UpdateStatus(RecognizerStatus::MissingRuntimeDll,
-                     L"Vosk runtime (libvosk.dll) not found. Place libvosk.dll in the application folder.");
+                     L"Vosk runtime could not be loaded. Reinstall Virtual Overlay or copy all bundled Vosk DLLs into the application folder.");
         return false;
     }
 

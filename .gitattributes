@@ -1,3 +1,6 @@
+# Preserve upstream license texts, including their original whitespace.
+lib/vosk/LICENSE.*.txt -text -whitespace
+
 # Squad: union merge for append-only team state files
 .squad/decisions.md merge=union
 .squad/agents/*/history.md merge=union

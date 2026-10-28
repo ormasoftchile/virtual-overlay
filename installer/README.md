@@ -6,7 +6,8 @@ This directory contains WiX v4 MSI installer definition files.
 
 - [WiX Toolset v4](https://wixtoolset.org/releases/) or later
 - .NET SDK 6.0 or later (for WiX v4)
-- Built Release binary (`build/Release/virtual-overlay.exe`)
+- Built Release output (`build/Release/virtual-overlay.exe`, the four Vosk DLLs,
+  and their license/notice files, deployed automatically by CMake)
 
 ## Files
 
@@ -41,6 +42,18 @@ wix build Package.wxs -ext WixToolset.Util.wixext -o VirtualOverlay.msi
 ⚠️ The `-ext WixToolset.Util.wixext` flag is required. The build will fail without it.
 
 Expected install location: `%ProgramFiles%\VirtualOverlay\` (per-machine; prompts for admin).
+
+The MSI installs `libvosk.dll`, `libgcc_s_seh-1.dll`, `libstdc++-6.dll`, and
+`libwinpthread-1.dll` alongside the EXE, with their license/notice files. These
+are required for Presenter speech recognition; speech models remain a separate
+per-user download via `scripts/Get-VoskModel.ps1`.
+
+The installed `THIRD_PARTY_NOTICES.md`, `LICENSE.*.txt`, and `SOURCES.vosk.txt`
+cover Vosk, its embedded dependencies, and the companion runtime DLLs. Publish
+`SOURCES.vosk.txt` beside the MSI download as well; the release workflow does
+this automatically so recipients can access corresponding GNU runtime source
+without installing the application.
+For local builds, `build.ps1` copies this sidecar to `installer\SOURCES.vosk.txt`.
 
 The install is per-machine because signed builds are marked `uiAccess="true"` (see `VO_UIACCESS` in `CMakeLists.txt`), which Windows only honors for signed EXEs in Program Files. A signed `build\Release\virtual-overlay.exe` therefore will not launch from `build\`; install the MSI to run it. `-SkipSign` builds are not marked uiAccess and run from anywhere.
 
