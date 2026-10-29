@@ -41,6 +41,8 @@ UIAccess builds must be installed in Program Files using the MSI.
    - **Position**: Corner or center of screen
    - **Appearance**: Color, opacity, font size
    - **Dodge**: Auto-hide when cursor approaches
+   - **Screens**: Per-screen opt-out ("Show watermark on these screens") to keep
+     the overlay off specific monitors (e.g. a teleprompter or captured screen)
 
 ### Keyboard Shortcuts
 

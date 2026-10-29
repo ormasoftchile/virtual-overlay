@@ -8,6 +8,8 @@
 
 namespace VirtualOverlay {
 
+struct MonitorInfo;  // defined in utils/Monitor.h
+
 // Enums for configuration options
 enum class OverlayPosition {
     TopLeft,
@@ -115,9 +117,39 @@ struct FlipConfig {
     bool invertMouse = true;                   // Visible pointer moves mirrored to the hand (natural through glass)
     std::wstring toggleHotkey = L"Ctrl+Shift+F";
     FlipCursorMode cursorMode = FlipCursorMode::Magnified;
-    // Monitors to mirror, identified by their stable device name (e.g. "\\.\DISPLAY2")
-    std::vector<std::wstring> monitors;
 };
+
+// Per-monitor feature toggles, keyed by stable monitor ID (MonitorInfo::GetId()).
+// Monitors without an entry use the defaults below.
+struct PerMonitorSettings {
+    bool flip = false;        // Horizontal teleprompter mirror on this screen
+    bool showOverlay = true;  // Watermark/notification overlay may appear on this screen
+
+    bool operator==(const PerMonitorSettings&) const = default;
+};
+
+using MonitorSettingsMap = std::map<std::wstring, PerMonitorSettings>;
+
+// Returns the stored settings for a monitor. The string overload matches the
+// map key exactly (case-insensitive); the MonitorInfo overload also accepts
+// legacy keys (device path or GDI device name). Returns nullptr when the
+// monitor has no entry.
+const PerMonitorSettings* FindMonitorSettings(const MonitorSettingsMap& map, const std::wstring& id);
+const PerMonitorSettings* FindMonitorSettings(const MonitorSettingsMap& map, const MonitorInfo& mon);
+
+// Returns the stored settings, or the defaults when the monitor has no entry.
+PerMonitorSettings GetMonitorSettings(const MonitorSettingsMap& map, const MonitorInfo& mon);
+
+// Stores settings under id / mon.GetId(). Legacy-keyed duplicates for the same
+// monitor are dropped, and entries equal to the defaults are removed.
+void SetMonitorSettings(MonitorSettingsMap& map, const std::wstring& id, const PerMonitorSettings& settings);
+void SetMonitorSettings(MonitorSettingsMap& map, const MonitorInfo& mon, const PerMonitorSettings& settings);
+
+// Whether the overlay may be shown on this monitor. Explicit opt-outs
+// (showOverlay == false) apply to every overlay mode. Mirrored (flipped)
+// non-primary screens never show the watermark, because MirrorWindow captures
+// and re-renders it mirrored.
+bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon, OverlayMode mode);
 
 // Per-monitor reading-baseline anchor in display-relative normalized coordinates [0.0, 1.0]
 struct PresenterMonitorAnchor {
@@ -162,6 +194,8 @@ struct AppConfig {
     OverlayConfig overlay;
     FlipConfig flip;
     PresenterConfig presenter;
+    // Per-monitor feature toggles (flip, watermark opt-out), keyed by stable ID
+    MonitorSettingsMap monitors;
 };
 
 // Configuration manager

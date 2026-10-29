@@ -33,6 +33,8 @@ constexpr int IDC_OVL_AUTOHIDE_MS_LABEL = 320;
 constexpr int IDC_OVL_DODGE = 321;
 constexpr int IDC_OVL_DODGE_PROXIMITY = 322;
 constexpr int IDC_OVL_DODGE_PROXIMITY_LABEL = 323;
+constexpr int IDC_OVL_WM_MONITOR_BASE = 330;
+constexpr int IDC_OVL_WM_MONITOR_MAX = 16;
 
 constexpr int IDC_FLIP_ENABLE = 400;
 constexpr int IDC_FLIP_HOTKEY = 401;
@@ -73,13 +75,13 @@ public:
     static HWND CreateAboutPage(HWND hParent, HINSTANCE hInstance, const RECT& rcPage);
 
     static void LoadGeneralSettings(HWND hPage, const GeneralConfig& config);
-    static void LoadOverlaySettings(HWND hPage, const OverlayConfig& config);
-    static void LoadFlipSettings(HWND hPage, const FlipConfig& config);
+    static void LoadOverlaySettings(HWND hPage, const OverlayConfig& config, const MonitorSettingsMap& monitors);
+    static void LoadFlipSettings(HWND hPage, const FlipConfig& config, const MonitorSettingsMap& monitors);
     static void LoadPresenterSettings(HWND hPage, const PresenterConfig& config);
 
     static void SaveGeneralSettings(HWND hPage, GeneralConfig& config);
-    static void SaveOverlaySettings(HWND hPage, OverlayConfig& config);
-    static void SaveFlipSettings(HWND hPage, FlipConfig& config);
+    static void SaveOverlaySettings(HWND hPage, OverlayConfig& config, MonitorSettingsMap& monitors);
+    static void SaveFlipSettings(HWND hPage, FlipConfig& config, MonitorSettingsMap& monitors);
     static void SavePresenterSettings(HWND hPage, PresenterConfig& config);
 
 private:

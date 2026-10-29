@@ -141,46 +141,53 @@ void FlipManager::ApplySettings() {
     }
     ScopedUpdateGuard guard(m_inUpdate);
 
-    // Migrate any legacy "\\.\DISPLAYx" entries in config to stable EDID friendly names (e.g. "MNN")
-    // when the corresponding monitor is connected and has a friendly name.
+    // Migrate any legacy "\\.\DISPLAYx" keys in the per-monitor registry to stable
+    // EDID friendly names (e.g. "MNN") when the corresponding monitor is connected.
     {
-        auto& mutableFlip = Config::Instance().GetMutable().flip;
-        bool migrated = false;
-        for (auto& cfgId : mutableFlip.monitors) {
-            if (cfgId.rfind(L"\\\\.\\DISPLAY", 0) == 0) {
-                if (const MonitorInfo* mon = Monitor::Instance().GetByName(cfgId)) {
-                    std::wstring stableId = mon->GetId();
-                    if (!stableId.empty() && _wcsicmp(stableId.c_str(), cfgId.c_str()) != 0) {
-                        LOG_INFO("FlipManager: migrating configured monitor '%ws' -> '%ws'",
-                                 cfgId.c_str(), stableId.c_str());
-                        cfgId = stableId;
-                        migrated = true;
-                    }
+        auto& registry = Config::Instance().GetMutable().monitors;
+        std::vector<std::wstring> legacyKeys;
+        for (const auto& [key, settings] : registry) {
+            if (key.rfind(L"\\\\.\\DISPLAY", 0) == 0 && Monitor::Instance().GetByName(key)) {
+                const std::wstring stableId = Monitor::Instance().GetByName(key)->GetId();
+                if (!stableId.empty() && _wcsicmp(stableId.c_str(), key.c_str()) != 0) {
+                    legacyKeys.push_back(key);
                 }
             }
         }
-        if (migrated) {
+        for (const auto& key : legacyKeys) {
+            LOG_INFO("FlipManager: migrating configured monitor '%ws' -> stable id", key.c_str());
+            const MonitorInfo* mon = Monitor::Instance().GetByName(key);
+            PerMonitorSettings settings;
+            if (const PerMonitorSettings* found = FindMonitorSettings(registry, key)) {
+                settings = *found;
+            }
+            SetMonitorSettings(registry, key, PerMonitorSettings{});  // drops the legacy key
+            if (mon) {
+                PerMonitorSettings merged = GetMonitorSettings(registry, *mon);
+                merged.flip = merged.flip || settings.flip;
+                merged.showOverlay = merged.showOverlay && settings.showOverlay;
+                SetMonitorSettings(registry, *mon, merged);
+            }
+        }
+        if (!legacyKeys.empty()) {
             Persist();
         }
     }
 
     const auto& flip = Config::Instance().Get().flip;
-
-    // If flipping is globally disabled or no monitors are configured, tear down everything.
-    if (!flip.enabled || flip.monitors.empty()) {
-        if (!m_windows.empty()) {
-            DestroyAllMirrors();
-        }
-        RefreshCursorHandling();
-        return;
-    }
+    const auto& registry = Config::Instance().Get().monitors;
 
     // Resolve which configured monitors are currently connected and eligible to mirror.
     std::map<std::wstring, const MonitorInfo*> activeTargets;
-    for (const auto& configuredName : flip.monitors) {
-        const MonitorInfo* mon = Monitor::Instance().GetByName(configuredName);
+    bool anyConfigured = false;
+    for (const auto& [cfgId, settings] : registry) {
+        if (!settings.flip) {
+            continue;
+        }
+        anyConfigured = true;
+        const MonitorInfo* mon = Monitor::Instance().GetByName(cfgId);
         if (!mon) {
-            LOG_WARN("FlipManager: configured monitor %ws not found", configuredName.c_str());
+            LOG_WARN("FlipManager: configured monitor %ws not found", cfgId.c_str());
             continue;
         }
         const std::wstring id = mon->GetId();
@@ -193,6 +200,15 @@ void FlipManager::ApplySettings() {
             continue;
         }
         activeTargets[id] = mon;
+    }
+
+    // If flipping is globally disabled or no monitors are configured, tear down everything.
+    if (!flip.enabled || !anyConfigured) {
+        if (!m_windows.empty()) {
+            DestroyAllMirrors();
+        }
+        RefreshCursorHandling();
+        return;
     }
 
     // Remove mirrors that are no longer configured OR whose monitor is not currently eligible.
@@ -275,26 +291,35 @@ void FlipManager::SetFlipped(const std::wstring& deviceName, bool flipped) {
         }
     }
 
-    auto& monitors = Config::Instance().GetMutable().flip.monitors;
-    monitors.erase(
-        std::remove_if(monitors.begin(), monitors.end(), [&](const std::wstring& entry) {
-            if (_wcsicmp(entry.c_str(), deviceName.c_str()) == 0 ||
-                _wcsicmp(entry.c_str(), targetId.c_str()) == 0) {
-                return true;
-            }
-            return mon && mon->MatchesId(entry);
-        }),
-        monitors.end());
-
-    if (flipped) {
-        monitors.push_back(targetId);
+    auto& registry = Config::Instance().GetMutable().monitors;
+    PerMonitorSettings settings;
+    if (mon) {
+        settings = GetMonitorSettings(registry, *mon);
+    } else if (const PerMonitorSettings* found = FindMonitorSettings(registry, targetId)) {
+        settings = *found;
+    }
+    settings.flip = flipped;
+    if (mon) {
+        // Also drops any legacy-keyed (device path / GDI name) duplicates.
+        SetMonitorSettings(registry, *mon, settings);
     } else {
+        SetMonitorSettings(registry, targetId, settings);
+    }
+
+    if (!flipped) {
         DestroyMirror(targetId);
         DestroyMirror(deviceName);
     }
 
     // Keep the global "enabled" flag in sync with whether anything is mirrored.
-    Config::Instance().GetMutable().flip.enabled = !monitors.empty();
+    bool anyFlipped = false;
+    for (const auto& [id, s] : registry) {
+        if (s.flip) {
+            anyFlipped = true;
+            break;
+        }
+    }
+    Config::Instance().GetMutable().flip.enabled = anyFlipped;
 
     Persist();
     ApplySettings();

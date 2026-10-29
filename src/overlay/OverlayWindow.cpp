@@ -137,24 +137,42 @@ void OverlayWindow::Show(int desktopIndex, const std::wstring& desktopName) {
     // Always update position (settings may have changed)
     UpdateWindowPosition();
 
+    // Honor per-monitor opt-outs: on a screen that opted out, the overlay stays
+    // hidden until the target moves to a screen that allows it again.
+    const bool allowed = ResolveTargetMonitor() != nullptr;
+
     // Watermark mode: always visible, no animation, use per-pixel alpha
     if (m_settings.mode == OverlayMode::Watermark) {
         m_state.state = OverlayState::Visible;
         m_state.opacity = 1.0f;
         m_state.slideOffset = 0.0f;
-        // Show window first
-        ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
-        SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, 
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        // Use UpdateLayeredWindow for true per-pixel alpha
-        RenderWatermark();
+        m_hiddenByPolicy = !allowed;
+        if (allowed) {
+            // Show window first
+            ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
+            SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, 
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            // Use UpdateLayeredWindow for true per-pixel alpha
+            RenderWatermark();
+            LOG_DEBUG("Watermark Show: using per-pixel alpha");
+        } else {
+            // Keep the logical "visible" state so CheckPosition re-evaluates and
+            // the watermark can reappear on a screen that allows it.
+            ShowWindow(m_hwnd, SW_HIDE);
+            LOG_DEBUG("Watermark Show: target monitor opted out, staying hidden");
+        }
         
         // Start dodge timer if enabled
         if (m_settings.dodgeOnHover) {
             SetTimer(m_hwnd, TIMER_OVERLAY_DODGE, TIMER_DODGE_INTERVAL_MS, nullptr);
         }
         
-        LOG_DEBUG("Watermark Show: using per-pixel alpha");
+        return;
+    }
+
+    // Notification mode: never show on an opted-out screen
+    if (!allowed) {
+        LOG_DEBUG("Overlay Show: target monitor opted out, staying hidden");
         return;
     }
 
@@ -186,6 +204,8 @@ void OverlayWindow::Hide() {
     if (m_state.state == OverlayState::Hidden || m_state.state == OverlayState::FadeOut) {
         return;
     }
+
+    m_hiddenByPolicy = false;
 
     // Watermark mode: immediate hide, no animation
     if (m_settings.mode == OverlayMode::Watermark) {
@@ -235,6 +255,35 @@ void OverlayWindow::CheckPosition() {
         return;
     }
 
+    // Per-monitor opt-out: the overlay is never shown on screens that opted
+    // out. The watermark keeps its logical "visible" state so it reappears as
+    // soon as the target screen allows it again.
+    if (ResolveTargetMonitor() == nullptr) {
+        if (m_settings.mode == OverlayMode::Watermark) {
+            if (!m_hiddenByPolicy) {
+                m_hiddenByPolicy = true;
+                ShowWindow(m_hwnd, SW_HIDE);
+                LOG_DEBUG("Watermark hidden: target monitor opted out");
+            }
+            return;
+        }
+        Hide();  // Notification mode drops entirely
+        return;
+    }
+
+    if (m_hiddenByPolicy) {
+        m_hiddenByPolicy = false;
+        UpdateWindowPosition();
+        ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
+        if (m_settings.mode == OverlayMode::Watermark) {
+            RenderWatermark();
+        } else {
+            InvalidateRect(m_hwnd, nullptr, TRUE);
+            UpdateWindow(m_hwnd);
+        }
+        LOG_DEBUG("Overlay reappeared: target monitor allows overlay again");
+    }
+
     // If dodging, verify the dodge monitor rect is still valid and unchanged
     if (m_isDodging) {
         HMONITOR hMon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
@@ -277,6 +326,7 @@ void OverlayWindow::ApplySettings(const OverlaySettings& settings) {
     
     m_isDodging = false;
     m_dodgeMonitorRect = {};
+    m_hiddenByPolicy = false;
     m_settings = settings;
 
     // Reset resources that depend on settings (font size, opacity)
@@ -863,6 +913,40 @@ void OverlayWindow::OnDodgeTimer() {
     }
 }
 
+HMONITOR OverlayWindow::ResolveTargetMonitor() const {
+    HMONITOR hTargetMon = nullptr;
+
+    switch (m_settings.monitor) {
+        case MonitorSelection::Cursor: {
+            POINT pt = {};
+            GetCursorPos(&pt);
+            hTargetMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            break;
+        }
+        case MonitorSelection::Primary:
+        case MonitorSelection::All:
+        default: {
+            POINT zero = { 0, 0 };
+            hTargetMon = MonitorFromPoint(zero, MONITOR_DEFAULTTOPRIMARY);
+            break;
+        }
+    }
+
+    if (!hTargetMon) {
+        return nullptr;
+    }
+
+    // Honor per-monitor opt-outs (and the no-watermark-on-mirrored-screens rule)
+    // via the shared per-monitor settings registry.
+    if (const MonitorInfo* mon = Monitor::Instance().GetByHandle(hTargetMon)) {
+        if (!IsOverlayAllowedOn(Config::Instance().Get().monitors, *mon, m_settings.mode)) {
+            return nullptr;
+        }
+    }
+
+    return hTargetMon;
+}
+
 void OverlayWindow::CalculateWindowPosition(int& x, int& y, int width, int height) {
     // Get target monitor workArea directly from live Win32 monitor APIs
     RECT monitorRect = {};
@@ -871,43 +955,18 @@ void OverlayWindow::CalculateWindowPosition(int& x, int& y, int width, int heigh
     if (m_isDodging && (m_dodgeMonitorRect.right - m_dodgeMonitorRect.left) > 0) {
         monitorRect = m_dodgeMonitorRect;
     } else {
-        HMONITOR hTargetMon = nullptr;
-
-        switch (m_settings.monitor) {
-            case MonitorSelection::Cursor: {
-                POINT pt = {};
-                GetCursorPos(&pt);
-                hTargetMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-                // In watermark mode, if the cursor is over a flipped teleprompter monitor
-                // (or a configured flip monitor that is not primary), keep the watermark on
-                // the primary monitor so it doesn't stay on the teleprompter.
-                if (m_settings.mode == OverlayMode::Watermark && hTargetMon) {
-                    if (const MonitorInfo* mon = Monitor::Instance().GetByHandle(hTargetMon)) {
-                        const auto& flipMons = Config::Instance().Get().flip.monitors;
-                        bool isConfiguredFlip = FlipManager::Instance().IsFlipped(mon->GetId());
-                        if (!isConfiguredFlip) {
-                            for (const auto& fm : flipMons) {
-                                if (mon->MatchesId(fm)) {
-                                    isConfiguredFlip = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!mon->isPrimary && isConfiguredFlip) {
-                            POINT zero = { 0, 0 };
-                            hTargetMon = MonitorFromPoint(zero, MONITOR_DEFAULTTOPRIMARY);
-                        }
-                    }
-                }
-                break;
+        HMONITOR hTargetMon = ResolveTargetMonitor();
+        if (!hTargetMon) {
+            // Target screen is opted out (the window is hidden anyway): keep the
+            // last known position instead of jumping monitors.
+            RECT rcWindow = {};
+            if (GetWindowRect(m_hwnd, &rcWindow)) {
+                x = rcWindow.left;
+                y = rcWindow.top;
+                return;
             }
-            case MonitorSelection::Primary:
-            case MonitorSelection::All:
-            default: {
-                POINT zero = { 0, 0 };
-                hTargetMon = MonitorFromPoint(zero, MONITOR_DEFAULTTOPRIMARY);
-                break;
-            }
+            POINT zero = { 0, 0 };
+            hTargetMon = MonitorFromPoint(zero, MONITOR_DEFAULTTOPRIMARY);
         }
 
         MONITORINFO mi = {};

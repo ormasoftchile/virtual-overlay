@@ -402,15 +402,15 @@ void SettingsWindow::OnOK() {
 
 void SettingsWindow::LoadSettingsToUI() {
     SettingsPages::LoadGeneralSettings(m_hPageGeneral, m_workingConfig.general);
-    SettingsPages::LoadOverlaySettings(m_hPageOverlay, m_workingConfig.overlay);
-    SettingsPages::LoadFlipSettings(m_hPageFlip, m_workingConfig.flip);
+    SettingsPages::LoadOverlaySettings(m_hPageOverlay, m_workingConfig.overlay, m_workingConfig.monitors);
+    SettingsPages::LoadFlipSettings(m_hPageFlip, m_workingConfig.flip, m_workingConfig.monitors);
     SettingsPages::LoadPresenterSettings(m_hPagePresenter, m_workingConfig.presenter);
 }
 
 void SettingsWindow::SaveSettingsFromUI() {
     SettingsPages::SaveGeneralSettings(m_hPageGeneral, m_workingConfig.general);
-    SettingsPages::SaveOverlaySettings(m_hPageOverlay, m_workingConfig.overlay);
-    SettingsPages::SaveFlipSettings(m_hPageFlip, m_workingConfig.flip);
+    SettingsPages::SaveOverlaySettings(m_hPageOverlay, m_workingConfig.overlay, m_workingConfig.monitors);
+    SettingsPages::SaveFlipSettings(m_hPageFlip, m_workingConfig.flip, m_workingConfig.monitors);
     SettingsPages::SavePresenterSettings(m_hPagePresenter, m_workingConfig.presenter);
 }
 

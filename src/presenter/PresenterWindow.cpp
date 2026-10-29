@@ -147,9 +147,11 @@ const MonitorInfo* PresenterWindow::ResolveTargetMonitor() const {
     }
 
     // 3. If a monitor is currently flipped for teleprompter (e.g. MNN), prefer it!
-    const auto& flipMonitors = Config::Instance().Get().flip.monitors;
-    for (const auto& fm : flipMonitors) {
-        if (const MonitorInfo* mon = monMgr.GetByName(fm)) {
+    for (const auto& [monId, settings] : Config::Instance().Get().monitors) {
+        if (!settings.flip) {
+            continue;
+        }
+        if (const MonitorInfo* mon = monMgr.GetByName(monId)) {
             if (FlipManager::Instance().IsFlipped(mon->GetId()) || !mon->isPrimary) {
                 return mon;
             }

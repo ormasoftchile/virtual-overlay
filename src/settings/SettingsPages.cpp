@@ -474,10 +474,36 @@ HWND SettingsPages::CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const R
 
     CreateButton(hPage, hInstance, IDC_OVL_PREVIEW, L"Preview", x, y, 80, 25);
 
+    // Right column: per-monitor watermark opt-out (shared monitor registry)
+    int mx = 330;
+    int my = 14;
+    CreateLabel(hPage, hInstance, 0, L"Show watermark on these screens:", mx, my, 250, ctrlH);
+    my += 22;
+
+    const auto& monitors = Monitor::Instance().GetMonitors();
+    if (monitors.empty()) {
+        CreateLabel(hPage, hInstance, 0, L"No monitors detected", mx + 15, my, 200, ctrlH);
+        my += 22;
+    } else {
+        for (size_t i = 0; i < monitors.size() && i < IDC_OVL_WM_MONITOR_MAX; ++i) {
+            std::wstring label = monitors[i].GetDisplayName(i);
+            CreateCheckbox(hPage, hInstance,
+                           IDC_OVL_WM_MONITOR_BASE + static_cast<int>(i),
+                           label.c_str(), mx + 15, my, 250, ctrlH);
+            my += 22;
+        }
+    }
+    my += 8;
+    CreateLabel(hPage, hInstance, 0,
+                L"Unchecked screens never show the overlay.\n"
+                L"Mirrored (flipped) teleprompter screens never\n"
+                L"show the watermark.",
+                mx, my, 250, 54);
+
     return hPage;
 }
 
-void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config) {
+void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config, const MonitorSettingsMap& monitors) {
     if (!hPage) return;
 
     CheckDlgButton(hPage, IDC_OVL_ENABLE, config.enabled ? BST_CHECKED : BST_UNCHECKED);
@@ -517,9 +543,16 @@ void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config)
     ShowWindow(GetDlgItem(hPage, IDC_OVL_AUTOHIDE), showCmd);
     ShowWindow(GetDlgItem(hPage, IDC_OVL_AUTOHIDE_DELAY), showCmd);
     ShowWindow(GetDlgItem(hPage, IDC_OVL_AUTOHIDE_MS_LABEL), showCmd);
+
+    const auto& mons = Monitor::Instance().GetMonitors();
+    for (size_t i = 0; i < mons.size() && i < IDC_OVL_WM_MONITOR_MAX; ++i) {
+        bool shown = GetMonitorSettings(monitors, mons[i]).showOverlay;
+        CheckDlgButton(hPage, IDC_OVL_WM_MONITOR_BASE + static_cast<int>(i),
+                       shown ? BST_CHECKED : BST_UNCHECKED);
+    }
 }
 
-void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config) {
+void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config, MonitorSettingsMap& monitors) {
     if (!hPage) return;
 
     config.enabled = IsDlgButtonChecked(hPage, IDC_OVL_ENABLE) == BST_CHECKED;
@@ -556,6 +589,14 @@ void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config) {
     
     config.dodgeOnHover = IsDlgButtonChecked(hPage, IDC_OVL_DODGE) == BST_CHECKED;
     config.dodgeProximity = static_cast<int>(SendDlgItemMessageW(hPage, IDC_OVL_DODGE_PROXIMITY, TBM_GETPOS, 0, 0));
+
+    // Per-monitor watermark opt-out (flip flags for these monitors are preserved)
+    const auto& mons = Monitor::Instance().GetMonitors();
+    for (size_t i = 0; i < mons.size() && i < IDC_OVL_WM_MONITOR_MAX; ++i) {
+        PerMonitorSettings settings = GetMonitorSettings(monitors, mons[i]);
+        settings.showOverlay = IsDlgButtonChecked(hPage, IDC_OVL_WM_MONITOR_BASE + static_cast<int>(i)) == BST_CHECKED;
+        SetMonitorSettings(monitors, mons[i], settings);
+    }
 }
 
 // =============================================================================
@@ -627,7 +668,7 @@ HWND SettingsPages::CreateFlipPage(HWND hParent, HINSTANCE hInstance, const RECT
     return hPage;
 }
 
-void SettingsPages::LoadFlipSettings(HWND hPage, const FlipConfig& config) {
+void SettingsPages::LoadFlipSettings(HWND hPage, const FlipConfig& config, const MonitorSettingsMap& monitors) {
     if (!hPage) return;
 
     CheckDlgButton(hPage, IDC_FLIP_ENABLE, config.enabled ? BST_CHECKED : BST_UNCHECKED);
@@ -637,16 +678,15 @@ void SettingsPages::LoadFlipSettings(HWND hPage, const FlipConfig& config) {
     const int cursorSel = (config.cursorMode == FlipCursorMode::None) ? 1 : 0;
     SendDlgItemMessageW(hPage, IDC_FLIP_CURSOR_MODE, CB_SETCURSEL, cursorSel, 0);
 
-    const auto& monitors = Monitor::Instance().GetMonitors();
-    for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
-        bool isFlipped = std::any_of(config.monitors.begin(), config.monitors.end(),
-            [&](const std::wstring& id) { return monitors[i].MatchesId(id); });
+    const auto& mons = Monitor::Instance().GetMonitors();
+    for (size_t i = 0; i < mons.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
+        bool isFlipped = GetMonitorSettings(monitors, mons[i]).flip;
         CheckDlgButton(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i),
                        isFlipped ? BST_CHECKED : BST_UNCHECKED);
     }
 }
 
-void SettingsPages::SaveFlipSettings(HWND hPage, FlipConfig& config) {
+void SettingsPages::SaveFlipSettings(HWND hPage, FlipConfig& config, MonitorSettingsMap& monitors) {
     if (!hPage) return;
 
     config.enabled = (IsDlgButtonChecked(hPage, IDC_FLIP_ENABLE) == BST_CHECKED);
@@ -662,25 +702,19 @@ void SettingsPages::SaveFlipSettings(HWND hPage, FlipConfig& config) {
     if (curSel == 0) config.cursorMode = FlipCursorMode::Magnified;
     else if (curSel == 1) config.cursorMode = FlipCursorMode::None;
 
-    const auto& monitors = Monitor::Instance().GetMonitors();
-    std::vector<std::wstring> updatedMonitors;
-
-    for (const auto& existingId : config.monitors) {
-        bool connectedNow = std::any_of(monitors.begin(), monitors.end(),
-            [&](const MonitorInfo& m) { return m.MatchesId(existingId); });
-        if (!connectedNow) {
-            updatedMonitors.push_back(existingId);
-        }
-    }
-
+    // Per-monitor flip flags (watermark opt-outs for these monitors are preserved).
+    // Entries for disconnected monitors stay untouched in the registry.
+    const auto& mons = Monitor::Instance().GetMonitors();
     bool anyCheckedNow = false;
-    for (size_t i = 0; i < monitors.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
-        if (IsDlgButtonChecked(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i)) == BST_CHECKED) {
-            updatedMonitors.push_back(monitors[i].GetId());
+    for (size_t i = 0; i < mons.size() && i < IDC_FLIP_MONITOR_MAX; ++i) {
+        bool flipped = IsDlgButtonChecked(hPage, IDC_FLIP_MONITOR_BASE + static_cast<int>(i)) == BST_CHECKED;
+        if (flipped) {
             anyCheckedNow = true;
         }
+        PerMonitorSettings settings = GetMonitorSettings(monitors, mons[i]);
+        settings.flip = flipped;
+        SetMonitorSettings(monitors, mons[i], settings);
     }
-    config.monitors = std::move(updatedMonitors);
     if (anyCheckedNow) {
         config.enabled = true;
     }

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Per-monitor watermark opt-out** - Per-screen checkboxes on the Overlay
+  settings page ("Show watermark on these screens") keep the overlay and
+  watermark off specific monitors. While the overlay's target screen is opted
+  out it stays hidden and reappears automatically on a screen that allows it.
+
+### Changed
+- Per-monitor feature toggles (flip and watermark opt-out) now live in a unified
+  `monitors` registry in `config.json`
+  (`"monitors": { "<screen-id>": { "flip": true, "overlay": false } }`).
+  Legacy `flip.monitors` arrays are migrated automatically on load and are no
+  longer written.
+- When the cursor is on a mirrored (flipped) teleprompter screen, the watermark
+  now hides instead of relocating to the primary monitor. Mirrored non-primary
+  screens never show the watermark (MirrorWindow would capture and re-render it
+  mirrored); the primary keeps it, as before.
+
 ## [1.0.0] - 2026-02-05
 
 ### Added

@@ -495,6 +495,94 @@ static void TestConfigPersistenceRoundTrip() {
     fs::remove(fs::path(tmpCfg.wstring() + L".bak"));
 }
 
+static void TestMonitorRegistryAndLegacyMigration() {
+    // --- Registry helpers ---
+    MonitorSettingsMap registry;
+
+    MonitorInfo primary = {};
+    primary.friendlyName = L"MNN";
+    primary.devicePath = L"\\\\?\\DISPLAY#MNN#1";
+    primary.name = L"\\\\.\\DISPLAY1";
+    primary.isPrimary = true;
+
+    MonitorInfo teleprompter = {};
+    teleprompter.friendlyName = L"TPM";
+    teleprompter.devicePath = L"\\\\?\\DISPLAY#TPM#2";
+    teleprompter.name = L"\\\\.\\DISPLAY2";
+    teleprompter.isPrimary = false;
+
+    EXPECT_TRUE(FindMonitorSettings(registry, primary) == nullptr, "no entry on empty registry");
+    EXPECT_EQ(GetMonitorSettings(registry, primary).showOverlay, true, "default shows overlay");
+    EXPECT_EQ(GetMonitorSettings(registry, primary).flip, false, "default not flipped");
+
+    PerMonitorSettings tp;
+    tp.flip = true;
+    tp.showOverlay = false;
+    SetMonitorSettings(registry, teleprompter.name, tp);  // store under legacy GDI key
+    EXPECT_EQ(registry.size(), size_t(1), "entry stored once");
+    EXPECT_TRUE(FindMonitorSettings(registry, teleprompter) != nullptr, "find by MonitorInfo resolves legacy key");
+    SetMonitorSettings(registry, teleprompter, tp);       // canonical write collapses the key
+    EXPECT_EQ(registry.size(), size_t(1), "no duplicate entries for one monitor");
+    EXPECT_TRUE(FindMonitorSettings(registry, std::wstring(L"TPM")) != nullptr, "entry keyed by stable id");
+    SetMonitorSettings(registry, teleprompter, PerMonitorSettings{});
+    EXPECT_TRUE(registry.empty(), "default settings drop the entry");
+
+    // --- Overlay policy ---
+    PerMonitorSettings flipOnly;
+    flipOnly.flip = true;
+    SetMonitorSettings(registry, teleprompter, flipOnly);
+    EXPECT_EQ(IsOverlayAllowedOn(registry, primary, OverlayMode::Watermark), true, "watermark allowed on primary");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Watermark), false, "watermark hidden on flipped screen");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Notification), true, "notification unaffected by flip");
+
+    PerMonitorSettings primaryFlip;
+    primaryFlip.flip = true;
+    SetMonitorSettings(registry, primary, primaryFlip);
+    EXPECT_EQ(IsOverlayAllowedOn(registry, primary, OverlayMode::Watermark), true, "flipped primary keeps watermark");
+
+    registry.clear();
+    PerMonitorSettings optedOut;
+    optedOut.showOverlay = false;
+    SetMonitorSettings(registry, teleprompter, optedOut);
+    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Watermark), false, "explicit opt-out hides watermark");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Notification), false, "explicit opt-out hides notification");
+
+    // --- Legacy flip.monitors array migration (config v1) ---
+    fs::path tmpCfg = fs::temp_directory_path() / L"vo_test_monitors_config.json";
+    fs::remove(tmpCfg);
+    {
+        std::ofstream out(tmpCfg);
+        out << R"({
+  "$schema": "virtual-overlay-config-v1",
+  "flip": { "enabled": true, "monitors": ["MNN", "\\\\.\\DISPLAY2"] }
+})";
+    }
+
+    auto& cfg = Config::Instance();
+    cfg.Reset();
+    EXPECT_TRUE(cfg.Load(tmpCfg.wstring()), "load legacy config");
+    EXPECT_EQ(cfg.Get().monitors.size(), size_t(2), "legacy flip list migrated to registry");
+    const PerMonitorSettings* migrated = FindMonitorSettings(cfg.Get().monitors, std::wstring(L"MNN"));
+    EXPECT_TRUE(migrated != nullptr, "migrated entry present");
+    EXPECT_EQ(migrated ? migrated->flip : false, true, "migrated entry keeps flip");
+    EXPECT_EQ(migrated ? migrated->showOverlay : false, true, "migrated entry keeps overlay default");
+
+    // --- Registry round-trip ---
+    PerMonitorSettings optOut;
+    optOut.flip = false;
+    optOut.showOverlay = false;
+    cfg.GetMutable().monitors[L"TPM"] = optOut;
+    EXPECT_TRUE(cfg.Save(tmpCfg.wstring()), "save registry config");
+    cfg.Reset();
+    EXPECT_TRUE(cfg.Load(tmpCfg.wstring()), "reload registry config");
+    const PerMonitorSettings* reloaded = FindMonitorSettings(cfg.Get().monitors, std::wstring(L"TPM"));
+    EXPECT_EQ(reloaded ? reloaded->showOverlay : true, false, "opt-out persisted");
+    EXPECT_EQ(reloaded ? reloaded->flip : true, false, "flip flag persisted");
+
+    fs::remove(tmpCfg);
+    fs::remove(fs::path(tmpCfg.wstring() + L".bak"));
+}
+
 static void TestPresenterWindowAndControllerIntegration() {
     HINSTANCE hInst = GetModuleHandleW(nullptr);
     D2DRenderer::Instance().Init();
@@ -665,6 +753,7 @@ int main(int argc, char* argv[]) {
     RunTest("AudioInputManager enumeration & unavailable device handling", TestAudioDeviceEnumerationAndMissingDeviceHandling);
     RunTest("OfflineSpeechRecognizer grammar builder & model validation", TestVoskGrammarAndModelValidation);
     RunTest("Config presenter & per-monitor anchor persistence round-trip", TestConfigPersistenceRoundTrip);
+    RunTest("Per-monitor registry, overlay opt-out & legacy flip migration", TestMonitorRegistryAndLegacyMigration);
     RunTest("PresenterWindow layout, speech advancement & manual line seek", TestPresenterWindowAndControllerIntegration);
     RunTest("Vosk DLL loading & PresenterController close/reopen lifecycle", TestVoskDllAndPresenterControllerLifecycle);
 

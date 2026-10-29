@@ -57,6 +57,20 @@ This document describes manual test procedures for verifying Virtual Overlay ove
 
 **Pass**: [ ] **Fail**: [ ]
 
+### 1.4 Per-Monitor Watermark Opt-Out
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Connect 2 monitors and open Settings > Overlay tab | "Show watermark on these screens" lists both monitors |
+| 2 | Uncheck the second monitor and click Apply | Setting saved |
+| 3 | Move the cursor to the second monitor (Monitor = Cursor) | Watermark hides |
+| 4 | Move the cursor back to an allowed monitor | Watermark reappears |
+| 5 | Set Monitor to Primary, opt out the primary, click Apply | Watermark stays hidden |
+| 6 | Re-check all monitors and click Apply | Watermark follows the cursor again |
+| 7 | Enable flip on the second monitor (Flip Screen tab) and move the cursor there | No watermark on the flipped screen (it would be mirrored) |
+
+**Pass**: [ ] **Fail**: [ ]
+
 ---
 
 ## 2. Settings Window Tests

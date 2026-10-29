@@ -88,7 +88,7 @@ constexpr int IDC_BTN_OK = 101;
 constexpr int IDC_BTN_CANCEL = 102;
 constexpr int IDC_BTN_APPLY = 103;
 
-constexpr int SETTINGS_WIDTH = 520;
+constexpr int SETTINGS_WIDTH = 640;
 constexpr int SETTINGS_HEIGHT = 480;
 constexpr int TAB_HEIGHT = 380;
 constexpr int BUTTON_HEIGHT = 30;

@@ -84,6 +84,11 @@ private:
     void CalculateWindowPosition(int& x, int& y, int width, int height);
     void UpdateWindowPosition();
 
+    // Returns the monitor the overlay should occupy, honoring per-monitor
+    // opt-outs (and the no-watermark-on-mirrored-screens rule). Returns nullptr
+    // when the overlay must stay hidden on the current target screen.
+    HMONITOR ResolveTargetMonitor() const;
+
     // Text formatting
     std::wstring FormatDisplayText();
 
@@ -92,6 +97,7 @@ private:
     HINSTANCE m_hInstance = nullptr;
     bool m_initialized = false;
     bool m_updatingPosition = false;
+    bool m_hiddenByPolicy = false;  // Hidden because the target monitor is opted out
 
     // Settings and state
     OverlaySettings m_settings;

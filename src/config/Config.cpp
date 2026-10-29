@@ -1,5 +1,6 @@
 #include "Config.h"
 #include "../utils/Logger.h"
+#include "../utils/Monitor.h"
 #include "../../lib/json.hpp"
 
 #include <windows.h>
@@ -29,6 +30,83 @@ static std::wstring Utf8ToWide(const std::string& utf8) {
     std::wstring result(size, 0);
     MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), static_cast<int>(utf8.size()), result.data(), size);
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Per-monitor feature settings helpers
+// ---------------------------------------------------------------------------
+
+const PerMonitorSettings* FindMonitorSettings(const MonitorSettingsMap& map, const std::wstring& id) {
+    if (id.empty()) {
+        return nullptr;
+    }
+    for (const auto& [key, settings] : map) {
+        if (_wcsicmp(key.c_str(), id.c_str()) == 0) {
+            return &settings;
+        }
+    }
+    return nullptr;
+}
+
+const PerMonitorSettings* FindMonitorSettings(const MonitorSettingsMap& map, const MonitorInfo& mon) {
+    for (const auto& [key, settings] : map) {
+        if (mon.MatchesId(key)) {
+            return &settings;
+        }
+    }
+    return nullptr;
+}
+
+PerMonitorSettings GetMonitorSettings(const MonitorSettingsMap& map, const MonitorInfo& mon) {
+    if (const PerMonitorSettings* found = FindMonitorSettings(map, mon)) {
+        return *found;
+    }
+    return PerMonitorSettings{};
+}
+
+void SetMonitorSettings(MonitorSettingsMap& map, const std::wstring& id, const PerMonitorSettings& settings) {
+    if (id.empty()) {
+        return;
+    }
+    // Drop any case-insensitive duplicates of this key.
+    for (auto it = map.begin(); it != map.end();) {
+        if (_wcsicmp(it->first.c_str(), id.c_str()) == 0) {
+            it = map.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (!(settings == PerMonitorSettings{})) {
+        map[id] = settings;
+    }
+}
+
+void SetMonitorSettings(MonitorSettingsMap& map, const MonitorInfo& mon, const PerMonitorSettings& settings) {
+    // Drop legacy-keyed entries (device path / GDI name) for the same monitor.
+    for (auto it = map.begin(); it != map.end();) {
+        if (mon.MatchesId(it->first)) {
+            it = map.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (!(settings == PerMonitorSettings{})) {
+        map[mon.GetId()] = settings;
+    }
+}
+
+bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon, OverlayMode mode) {
+    const PerMonitorSettings* settings = FindMonitorSettings(map, mon);
+    if (settings && !settings->showOverlay) {
+        return false;
+    }
+    // Watermark never lands on a mirrored (flipped) non-primary screen:
+    // MirrorWindow captures and re-renders the screen content, so the text
+    // would show up mirrored.
+    if (mode == OverlayMode::Watermark && settings && settings->flip && !mon.isPrimary) {
+        return false;
+    }
+    return true;
 }
 
 Config& Config::Instance() {
@@ -183,12 +261,26 @@ bool Config::Load(const std::wstring& filePath) {
             if (f.contains("cursorMode")) {
                 m_config.flip.cursorMode = StringToFlipCursorMode(f["cursorMode"].get<std::string>());
             }
-            if (f.contains("monitors") && f["monitors"].is_array()) {
-                m_config.flip.monitors.clear();
-                for (const auto& mon : f["monitors"]) {
-                    if (mon.is_string()) {
-                        m_config.flip.monitors.push_back(Utf8ToWide(mon.get<std::string>()));
-                    }
+        }
+
+        // Parse per-monitor feature settings (flip + watermark opt-out)
+        if (j.contains("monitors") && j["monitors"].is_object()) {
+            for (auto it = j["monitors"].begin(); it != j["monitors"].end(); ++it) {
+                if (!it.value().is_object()) {
+                    continue;
+                }
+                PerMonitorSettings settings;
+                if (it.value().contains("flip")) settings.flip = it.value()["flip"].get<bool>();
+                if (it.value().contains("overlay")) settings.showOverlay = it.value()["overlay"].get<bool>();
+                m_config.monitors[Utf8ToWide(it.key())] = settings;
+            }
+        } else if (j.contains("flip") && j["flip"].contains("monitors") && j["flip"]["monitors"].is_array()) {
+            // Migrate the legacy flip.monitors list (config v1) to the registry
+            for (const auto& mon : j["flip"]["monitors"]) {
+                if (mon.is_string()) {
+                    PerMonitorSettings settings;
+                    settings.flip = true;
+                    m_config.monitors[Utf8ToWide(mon.get<std::string>())] = settings;
                 }
             }
         }
@@ -343,9 +435,14 @@ bool Config::Save(const std::wstring& filePath) {
         j["flip"]["invertMouse"] = m_config.flip.invertMouse;
         j["flip"]["toggleHotkey"] = WideToUtf8(m_config.flip.toggleHotkey);
         j["flip"]["cursorMode"] = FlipCursorModeToString(m_config.flip.cursorMode);
-        j["flip"]["monitors"] = json::array();
-        for (const auto& mon : m_config.flip.monitors) {
-            j["flip"]["monitors"].push_back(WideToUtf8(mon));
+
+        // Per-monitor feature settings (flip + watermark opt-out)
+        j["monitors"] = json::object();
+        for (const auto& [monId, settings] : m_config.monitors) {
+            j["monitors"][WideToUtf8(monId)] = {
+                { "flip", settings.flip },
+                { "overlay", settings.showOverlay }
+            };
         }
 
         // Presenter
