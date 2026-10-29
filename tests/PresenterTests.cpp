@@ -892,6 +892,17 @@ static void TestSettingsTypographyAndDpiLayout() {
                 RECT bounds = {};
                 GetWindowRect(control, &bounds);
                 MapWindowPoints(HWND_DESKTOP, page, reinterpret_cast<LPPOINT>(&bounds), 2);
+                if (bounds.left < 0 || bounds.top < 0 ||
+                    bounds.right > pageClient.right || bounds.bottom > pageClient.bottom) {
+                    RECT windowBounds = {};
+                    GetWindowRect(window, &windowBounds);
+                    std::printf("  Settings overflow: target DPI %u, actual DPI %u, tab %d, control %d, "
+                                "bounds (%ld,%ld)-(%ld,%ld), page %ldx%ld, window %ldx%ld\n",
+                                dpi, GetDpiForWindow(window), tabIndex, GetDlgCtrlID(control),
+                                bounds.left, bounds.top, bounds.right, bounds.bottom,
+                                pageClient.right, pageClient.bottom,
+                                windowBounds.right - windowBounds.left, windowBounds.bottom - windowBounds.top);
+                }
                 EXPECT_TRUE(bounds.left >= 0 && bounds.top >= 0 &&
                             bounds.right <= pageClient.right && bounds.bottom <= pageClient.bottom,
                             "settings control stays inside its page");
