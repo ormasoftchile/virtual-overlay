@@ -23,6 +23,10 @@
 #include "../src/presenter/ScriptAlignmentEngine.h"
 #include "../src/utils/D2DRenderer.h"
 #include "../src/utils/Monitor.h"
+#include "../src/settings/SettingsWindow.h"
+#include "../src/settings/SettingsPages.h"
+#include "../src/overlay/OverlayWindow.h"
+#include "../lib/json.hpp"
 
 namespace fs = std::filesystem;
 using namespace VirtualOverlay;
@@ -531,21 +535,19 @@ static void TestMonitorRegistryAndLegacyMigration() {
     PerMonitorSettings flipOnly;
     flipOnly.flip = true;
     SetMonitorSettings(registry, teleprompter, flipOnly);
-    EXPECT_EQ(IsOverlayAllowedOn(registry, primary, OverlayMode::Watermark), true, "watermark allowed on primary");
-    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Watermark), false, "watermark hidden on flipped screen");
-    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Notification), true, "notification unaffected by flip");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, primary), true, "watermark allowed on primary");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter), false, "watermark hidden on flipped screen");
 
     PerMonitorSettings primaryFlip;
     primaryFlip.flip = true;
     SetMonitorSettings(registry, primary, primaryFlip);
-    EXPECT_EQ(IsOverlayAllowedOn(registry, primary, OverlayMode::Watermark), true, "flipped primary keeps watermark");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, primary), true, "flipped primary keeps watermark");
 
     registry.clear();
     PerMonitorSettings optedOut;
     optedOut.showOverlay = false;
     SetMonitorSettings(registry, teleprompter, optedOut);
-    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Watermark), false, "explicit opt-out hides watermark");
-    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter, OverlayMode::Notification), false, "explicit opt-out hides notification");
+    EXPECT_EQ(IsOverlayAllowedOn(registry, teleprompter), false, "explicit opt-out hides watermark");
 
     // --- Legacy flip.monitors array migration (config v1) ---
     fs::path tmpCfg = fs::temp_directory_path() / L"vo_test_monitors_config.json";
@@ -581,6 +583,151 @@ static void TestMonitorRegistryAndLegacyMigration() {
 
     fs::remove(tmpCfg);
     fs::remove(fs::path(tmpCfg.wstring() + L".bak"));
+}
+
+static void TestWatermarkOnlyConfiguration() {
+    using nlohmann::json;
+    auto& config = Config::Instance();
+    fs::path file = fs::temp_directory_path() /
+        (L"vo_watermark_only_" + std::to_wstring(GetCurrentProcessId()) + L".json");
+    struct Cleanup {
+        fs::path file;
+        AppConfig original;
+        ~Cleanup() {
+            Config::Instance().GetMutable() = original;
+            for (const auto& path : { file, fs::path(file.wstring() + L".bak") }) {
+                std::error_code error;
+                fs::remove(path, error);
+                if (error) {
+                    std::printf("  Failed to clean watermark test config: %s\n", error.message().c_str());
+                    ++g_failed;
+                }
+            }
+        }
+    } cleanup{ file, config.Get() };
+
+    for (const char* mode : { "notification", "watermark" }) {
+        json legacy = {
+            { "overlay", {
+                { "mode", mode }, { "enabled", true }, { "autoHide", true }, { "autoHideDelayMs", 500 },
+                { "position", "bottom-left" }, { "monitor", "primary" }, { "format", "{name}" },
+                { "watermarkFontSize", 96 }, { "watermarkOpacity", 0.4f }, { "watermarkColor", "#AABBCC" },
+                { "dodgeOnHover", true }, { "dodgeProximity", 80 },
+                { "style", { { "blur", "acrylic" }, { "tintOpacity", 5.0f }, { "cornerRadius", 100 }, { "padding", 18 } } },
+                { "text", { { "fontFamily", "Segoe UI" }, { "fontWeight", 500 }, { "fontSize", 30 }, { "color", "#FFFFFF" } } },
+                { "animation", { { "fadeInDurationMs", 150 }, { "fadeOutDurationMs", 200 }, { "slideIn", true } } }
+            } },
+            { "presenter", { { "fontSize", 40 }, { "captionWidth", 900 } } },
+            { "monitors", { { "TPM", { { "flip", true }, { "overlay", false } } } } }
+        };
+        {
+            std::ofstream out(file);
+            out << legacy.dump(2);
+            EXPECT_TRUE(out.good(), "write legacy overlay config");
+        }
+        config.Reset();
+        EXPECT_TRUE(config.Load(file.wstring()), "load either legacy overlay mode");
+        EXPECT_TRUE(config.Validate(), "retired popup options cannot invalidate watermark settings");
+        const auto& overlay = config.Get().overlay;
+        EXPECT_EQ(overlay.enabled, true, "legacy watermark remains enabled");
+        EXPECT_EQ(overlay.position, OverlayPosition::BottomLeft, "position preserved");
+        EXPECT_EQ(overlay.monitor, MonitorSelection::Primary, "monitor choice preserved");
+        EXPECT_EQ(overlay.watermarkFontSize, 96, "watermark font size preserved");
+        EXPECT_TRUE(std::fabs(overlay.watermarkOpacity - 0.4f) < 1e-4f, "watermark opacity preserved");
+        EXPECT_EQ(overlay.watermarkColor, uint32_t(0xAABBCC), "watermark color preserved");
+        EXPECT_EQ(overlay.dodgeOnHover, true, "dodge preference preserved");
+        EXPECT_EQ(overlay.style.padding, 18, "watermark padding preserved");
+        EXPECT_EQ(overlay.text.fontFamily, std::wstring(L"Segoe UI"), "watermark font family preserved");
+        EXPECT_EQ(overlay.text.fontWeight, 500, "watermark weight preserved");
+        EXPECT_EQ(config.Get().presenter.fontSize, 40, "Presenter configuration preserved");
+        EXPECT_EQ(config.Get().monitors.at(L"TPM").showOverlay, false, "screen opt-out preserved");
+        EXPECT_EQ(config.Get().monitors.at(L"TPM").flip, true, "screen flip preserved");
+        EXPECT_TRUE(config.Save(file.wstring()), "save watermark-only configuration");
+        json saved;
+        {
+            std::ifstream input(file);
+            input >> saved;
+        }
+        const auto& savedOverlay = saved.at("overlay");
+        for (const char* key : { "mode", "autoHide", "autoHideDelayMs", "animation" }) {
+            EXPECT_TRUE(!savedOverlay.contains(key), "saved configuration omits retired popup options");
+        }
+        EXPECT_EQ(savedOverlay.at("style"), json({ { "padding", 18 } }), "only watermark style is saved");
+        EXPECT_TRUE(!savedOverlay.at("text").contains("fontSize") && !savedOverlay.at("text").contains("color"),
+                    "unused popup text options are omitted");
+        config.Reset();
+        EXPECT_TRUE(config.Load(file.wstring()), "reload watermark-only config without a mode field");
+        EXPECT_EQ(config.Get().overlay.format, std::wstring(L"{name}"), "watermark format round-trips");
+    }
+
+    config.GetMutable().overlay.enabled = false;
+    EXPECT_TRUE(config.Save(file.wstring()), "save disabled watermark");
+    config.Reset();
+    EXPECT_TRUE(config.Load(file.wstring()), "reload disabled watermark");
+    EXPECT_EQ(config.Get().overlay.enabled, false, "disabled watermark is not force-enabled");
+}
+
+static void TestPersistentWatermarkLifecycle() {
+    auto& config = Config::Instance();
+    auto& overlay = OverlayWindow::Instance();
+    struct Cleanup {
+        AppConfig original;
+        ~Cleanup() {
+            OverlayWindow::Instance().Hide();
+            OverlayWindow::Instance().Shutdown();
+            Config::Instance().GetMutable() = original;
+        }
+    } cleanup{ config.Get() };
+    config.Reset();
+    Monitor::Instance().Refresh();
+    EXPECT_TRUE(overlay.Init(GetModuleHandleW(nullptr)), "watermark window initializes");
+    OverlaySettings settings;
+    settings.monitor = MonitorSelection::Primary;
+    settings.watermarkFontSize = 24;
+    settings.format = L"{name}";
+    overlay.ApplySettings(settings);
+    overlay.Show(1, L"Watermark test");
+    EXPECT_EQ(overlay.GetState(), OverlayState::Visible, "watermark appears immediately without fading");
+    EXPECT_TRUE(IsWindowVisible(overlay.GetHwnd()), "watermark is physically visible");
+
+    ULONGLONG deadline = GetTickCount64() + 1250;
+    while (GetTickCount64() < deadline) {
+        MSG message = {};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        Sleep(10);
+    }
+    EXPECT_TRUE(IsWindowVisible(overlay.GetHwnd()), "watermark remains visible beyond the old 500ms auto-hide delay");
+    EXPECT_EQ(overlay.GetState(), OverlayState::Visible, "watermark does not transition into a fade-out");
+
+    RECT before = {}, after = {};
+    GetWindowRect(overlay.GetHwnd(), &before);
+    overlay.Show(2, L"A longer renamed desktop watermark");
+    GetWindowRect(overlay.GetHwnd(), &after);
+    EXPECT_TRUE(after.right - after.left > before.right - before.left, "desktop changes update watermark text dimensions");
+
+    const MonitorInfo* primary = Monitor::Instance().GetPrimary();
+    EXPECT_TRUE(primary != nullptr, "primary monitor available");
+    PerMonitorSettings optOut;
+    optOut.showOverlay = false;
+    SetMonitorSettings(config.GetMutable().monitors, *primary, optOut);
+    overlay.CheckPosition();
+    EXPECT_TRUE(!IsWindowVisible(overlay.GetHwnd()) && overlay.IsVisible(),
+                "screen opt-out hides the watermark while retaining its logical state");
+    SetMonitorSettings(config.GetMutable().monitors, *primary, PerMonitorSettings{});
+    overlay.CheckPosition();
+    EXPECT_TRUE(IsWindowVisible(overlay.GetHwnd()), "watermark returns when screen opt-out is removed");
+
+    settings.enabled = false;
+    overlay.ApplySettings(settings);
+    EXPECT_EQ(overlay.GetState(), OverlayState::Hidden, "disabling watermark hides immediately");
+    settings.enabled = true;
+    overlay.ApplySettings(settings);
+    EXPECT_TRUE(IsWindowVisible(overlay.GetHwnd()), "reenabling watermark shows it immediately");
+    overlay.Hide();
+    EXPECT_TRUE(!IsWindowVisible(overlay.GetHwnd()), "visibility toggle hides watermark without animation");
 }
 
 static void TestPresenterWindowAndControllerIntegration() {
@@ -673,6 +820,194 @@ static void TestPresenterWindowAndControllerIntegration() {
     win.Shutdown();
 }
 
+static HWND SelectSettingsPage(HWND window, int index) {
+    HWND tab = GetDlgItem(window, IDC_TAB_CONTROL);
+    TabCtrl_SetCurSel(tab, index);
+    NMHDR notification = { tab, IDC_TAB_CONTROL, TCN_SELCHANGE };
+    SendMessageW(window, WM_NOTIFY, IDC_TAB_CONTROL, reinterpret_cast<LPARAM>(&notification));
+    for (HWND page = FindWindowExW(window, nullptr, L"VirtualOverlaySettingsPage", nullptr);
+         page; page = FindWindowExW(window, page, L"VirtualOverlaySettingsPage", nullptr)) {
+        if (IsWindowVisible(page)) return page;
+    }
+    return nullptr;
+}
+
+static LRESULT CALLBACK SettingsDpiTestProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                           UINT_PTR subclassId, DWORD_PTR data) {
+    if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(window, SettingsDpiTestProc, subclassId);
+    }
+    LRESULT result = DefSubclassProc(window, message, wParam, lParam);
+    if (message == WM_GETMINMAXINFO) {
+        // Simulating DPI does not enlarge the CI runner's 1024x768 desktop.
+        // Model the corresponding viewport without clipping it to that desktop.
+        const auto* viewport = reinterpret_cast<const SIZE*>(data);
+        auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
+        limits->ptMaxTrackSize = { viewport->cx, viewport->cy };
+    }
+    return result;
+}
+
+static void TestSettingsTypographyAndDpiLayout() {
+    auto& settings = SettingsWindow::Instance();
+    struct Cleanup {
+        SIZE viewport = { 700, 500 };
+        ~Cleanup() { SettingsWindow::Instance().Shutdown(); }
+    } cleanup;
+    std::wstring originalFormat = Config::Instance().Get().overlay.format;
+    EXPECT_TRUE(settings.Init(GetModuleHandleW(nullptr), nullptr), "settings initialize");
+    settings.Open();
+    HWND window = settings.GetHwnd();
+    EXPECT_TRUE(window != nullptr && settings.IsOpen(), "settings open");
+    EXPECT_TRUE(SetWindowSubclass(window, SettingsDpiTestProc, 1,
+                                  reinterpret_cast<DWORD_PTR>(&cleanup.viewport)),
+                "synthetic DPI viewport is independent of the physical test desktop");
+
+    HWND overlay = SelectSettingsPage(window, 1);
+    EXPECT_TRUE(overlay != nullptr, "overlay page visible");
+    for (int retiredControl : { 301, 309, 310, 320 }) {
+        EXPECT_TRUE(GetDlgItem(overlay, retiredControl) == nullptr, "mode and auto-hide controls are removed");
+    }
+    SetDlgItemTextW(overlay, IDC_OVL_FORMAT, L"Unsaved DPI test");
+    HWND presenter = SelectSettingsPage(window, 3);
+    EXPECT_TRUE(presenter != nullptr, "presenter page visible");
+    SendDlgItemMessageW(presenter, IDC_PRES_FONT_SIZE, TBM_SETPOS, TRUE, 44);
+    SendDlgItemMessageW(presenter, IDC_PRES_LINES_COMBO, CB_SETCURSEL, 3, 0);
+
+    bool captionsFit = true;
+    for (UINT dpi : { 96u, 120u, 144u, 192u, 96u, 144u, 96u }) {
+        int selectedTab = TabCtrl_GetCurSel(GetDlgItem(window, IDC_TAB_CONTROL));
+        RECT suggested = {};
+        GetWindowRect(window, &suggested);
+        suggested.right = suggested.left + MulDiv(700, dpi, USER_DEFAULT_SCREEN_DPI);
+        suggested.bottom = suggested.top + MulDiv(500, dpi, USER_DEFAULT_SCREEN_DPI);
+        cleanup.viewport = { suggested.right - suggested.left, suggested.bottom - suggested.top };
+        SendMessageW(window, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&suggested));
+        EXPECT_EQ(TabCtrl_GetCurSel(GetDlgItem(window, IDC_TAB_CONTROL)), selectedTab,
+                  "selected tab survives DPI changes");
+
+        HFONT font = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
+        LOGFONTW actual = {};
+        EXPECT_TRUE(GetObjectW(font, sizeof(actual), &actual) != 0, "settings font is valid");
+        NONCLIENTMETRICSW metrics = { sizeof(metrics) };
+        EXPECT_TRUE(SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi),
+                    "native UI metrics available");
+        EXPECT_EQ(actual.lfHeight, metrics.lfMessageFont.lfHeight, "font follows native monitor DPI");
+        EXPECT_TRUE(wcscmp(actual.lfFaceName, metrics.lfMessageFont.lfFaceName) == 0,
+                    "settings use the native UI font face");
+        for (int id : { IDC_TAB_CONTROL, IDC_BTN_OK, IDC_BTN_CANCEL, IDC_BTN_APPLY }) {
+            EXPECT_EQ(reinterpret_cast<HFONT>(SendDlgItemMessageW(window, id, WM_GETFONT, 0, 0)), font,
+                      "tabs and footer buttons share the same font");
+        }
+
+        for (int tabIndex = 0; tabIndex < 5; ++tabIndex) {
+            HWND page = SelectSettingsPage(window, tabIndex);
+            EXPECT_TRUE(page != nullptr, "each settings tab is accessible");
+            constexpr int pageControls[] = {
+                IDC_GEN_START_WINDOWS, IDC_OVL_ENABLE, IDC_FLIP_ENABLE, IDC_PRES_ENABLE, IDC_ABOUT_VERSION
+            };
+            EXPECT_TRUE(GetDlgItem(page, pageControls[tabIndex]) != nullptr, "selected tab shows the correct page");
+            RECT pageClient = {};
+            GetClientRect(page, &pageClient);
+            for (HWND control = GetWindow(page, GW_CHILD); control; control = GetWindow(control, GW_HWNDNEXT)) {
+                RECT bounds = {};
+                GetWindowRect(control, &bounds);
+                MapWindowPoints(HWND_DESKTOP, page, reinterpret_cast<LPPOINT>(&bounds), 2);
+                if (bounds.left < 0 || bounds.top < 0 ||
+                    bounds.right > pageClient.right || bounds.bottom > pageClient.bottom) {
+                    RECT windowBounds = {};
+                    GetWindowRect(window, &windowBounds);
+                    std::printf("  Settings overflow: target DPI %u, actual DPI %u, tab %d, control %d, "
+                                "bounds (%ld,%ld)-(%ld,%ld), page %ldx%ld, window %ldx%ld\n",
+                                dpi, GetDpiForWindow(window), tabIndex, GetDlgCtrlID(control),
+                                bounds.left, bounds.top, bounds.right, bounds.bottom,
+                                pageClient.right, pageClient.bottom,
+                                windowBounds.right - windowBounds.left, windowBounds.bottom - windowBounds.top);
+                }
+                EXPECT_TRUE(bounds.left >= 0 && bounds.top >= 0 &&
+                            bounds.right <= pageClient.right && bounds.bottom <= pageClient.bottom,
+                            "settings control stays inside its page");
+                wchar_t className[32] = {};
+                GetClassNameW(control, className, 32);
+                bool isLabel = wcscmp(className, L"Static") == 0;
+                bool isButton = wcscmp(className, L"Button") == 0;
+                bool isCombo = wcscmp(className, WC_COMBOBOXW) == 0;
+                if (isLabel || isButton || isCombo || wcscmp(className, L"Edit") == 0 ||
+                    wcscmp(className, WC_LINK) == 0) {
+                    EXPECT_EQ(reinterpret_cast<HFONT>(SendMessageW(control, WM_GETFONT, 0, 0)), font,
+                              "all settings controls share the DPI-correct font");
+                }
+                if ((!isLabel && !isButton) || GetWindowTextLengthW(control) == 0) continue;
+
+                wchar_t text[1024] = {};
+                GetWindowTextW(control, text, 1024);
+                HDC dc = GetDC(control);
+                HGDIOBJ previous = SelectObject(dc, font);
+                RECT available = {};
+                GetClientRect(control, &available);
+                UINT format = DT_CALCRECT | DT_NOPREFIX;
+                if (isButton) {
+                    LONG_PTR style = GetWindowLongPtrW(control, GWL_STYLE);
+                    bool checkbox = (style & BS_TYPEMASK) == BS_AUTOCHECKBOX;
+                    available.right -= checkbox ? GetSystemMetricsForDpi(SM_CXMENUCHECK, dpi) + MulDiv(6, dpi, 96)
+                                                : MulDiv(12, dpi, 96);
+                    format |= DT_SINGLELINE;
+                } else {
+                    format |= DT_WORDBREAK;
+                }
+                RECT measured = available;
+                DrawTextW(dc, text, -1, &measured, format);
+                SelectObject(dc, previous);
+                ReleaseDC(control, dc);
+                if (measured.right > available.right || measured.bottom > available.bottom) {
+                    std::printf("  Clipped settings text at %u DPI: %ls (needs %ldx%ld; available %ldx%ld)\n",
+                                dpi, text, measured.right, measured.bottom, available.right, available.bottom);
+                    captionsFit = false;
+                }
+            }
+        }
+
+        RECT slider = {};
+        HWND fontSize = GetDlgItem(presenter, IDC_PRES_FONT_SIZE);
+        GetWindowRect(fontSize, &slider);
+        MapWindowPoints(HWND_DESKTOP, presenter, reinterpret_cast<LPPOINT>(&slider), 2);
+        EXPECT_EQ(slider.left, MulDiv(123, dpi, 96), "slider alignment scales without accumulated rounding");
+        EXPECT_EQ(slider.right - slider.left, MulDiv(230, dpi, 96), "slider width scales without drift");
+        EXPECT_EQ(SendMessageW(fontSize, TBM_GETPOS, 0, 0), LRESULT(44), "unsaved slider value survives DPI changes");
+        EXPECT_EQ(SendDlgItemMessageW(presenter, IDC_PRES_LINES_COMBO, CB_GETCURSEL, 0, 0), LRESULT(3),
+                  "unsaved combo selection survives DPI changes");
+        wchar_t format[64] = {};
+        GetDlgItemTextW(overlay, IDC_OVL_FORMAT, format, 64);
+        EXPECT_TRUE(wcscmp(format, L"Unsaved DPI test") == 0, "unsaved edit survives DPI changes");
+
+        for (int id : { IDC_PRES_CHANNEL_COMBO, IDC_PRES_LINES_COMBO }) {
+            HWND combo = GetDlgItem(presenter, id);
+            COMBOBOXINFO info = { sizeof(info) };
+            EXPECT_TRUE(GetComboBoxInfo(combo, &info), "combo text area available");
+            wchar_t text[256] = {};
+            GetWindowTextW(combo, text, 256);
+            HDC dc = GetDC(combo);
+            HGDIOBJ previous = SelectObject(dc, font);
+            SIZE textSize = {};
+            GetTextExtentPoint32W(dc, text, static_cast<int>(wcslen(text)), &textSize);
+            SelectObject(dc, previous);
+            ReleaseDC(combo, dc);
+            EXPECT_TRUE(textSize.cx <= info.rcItem.right - info.rcItem.left,
+                        "Presenter dropdown selection fits beside its arrow");
+        }
+    }
+    EXPECT_TRUE(captionsFit, "settings captions fit without truncation");
+
+    SendMessageW(window, WM_COMMAND, IDC_BTN_CANCEL, 0);
+    EXPECT_TRUE(!settings.IsOpen(), "settings close cleanly");
+    settings.Open();
+    EXPECT_TRUE(settings.IsOpen(), "settings reopen with a fresh font and layout");
+    overlay = SelectSettingsPage(settings.GetHwnd(), 1);
+    wchar_t restored[256] = {};
+    GetDlgItemTextW(overlay, IDC_OVL_FORMAT, restored, 256);
+    EXPECT_EQ(std::wstring(restored), originalFormat, "Cancel still discards unsaved settings");
+}
+
 static void TestVoskDllAndPresenterControllerLifecycle() {
     HINSTANCE hInst = GetModuleHandleW(nullptr);
     auto& ctrl = PresenterController::Instance();
@@ -734,6 +1069,38 @@ int main(int argc, char* argv[]) {
 
     std::printf("=== Virtual Overlay Presenter Test Suite ===\n");
 
+    if (argc == 2 && std::string(argv[1]) == "--watermark-only") {
+        RunTest("Watermark-only legacy configuration migration", TestWatermarkOnlyConfiguration);
+        RunTest("Persistent watermark lifecycle and monitor policy", TestPersistentWatermarkLifecycle);
+        RunTest("Per-monitor registry and legacy migration", TestMonitorRegistryAndLegacyMigration);
+        std::printf("Passed: %d | Failed: %d\n", g_passed, g_failed);
+        CoUninitialize();
+        return (g_failed == 0) ? 0 : 1;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--settings-only") {
+        RunTest("Settings native typography, control fit, DPI changes, and unsaved state",
+                TestSettingsTypographyAndDpiLayout);
+        CoUninitialize();
+        return (g_failed == 0) ? 0 : 1;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--settings-preview") {
+        auto& settings = SettingsWindow::Instance();
+        if (!settings.Init(GetModuleHandleW(nullptr), nullptr)) return 1;
+        settings.Open();
+        if (!settings.IsOpen()) return 1;
+        SelectSettingsPage(settings.GetHwnd(), 3);
+        MSG message = {};
+        while (settings.IsOpen() && GetMessageW(&message, nullptr, 0, 0) > 0) {
+            if (!IsDialogMessageW(settings.GetHwnd(), &message)) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        settings.Shutdown();
+        CoUninitialize();
+        return 0;
+    }
+
     RunTest("Bundled Vosk runtime and required exports", TestBundledVoskRuntime);
     if (argc == 2 && std::string(argv[1]) == "--vosk-runtime-only") {
         std::printf("Passed: %d | Failed: %d\n", g_passed, g_failed);
@@ -754,6 +1121,10 @@ int main(int argc, char* argv[]) {
     RunTest("OfflineSpeechRecognizer grammar builder & model validation", TestVoskGrammarAndModelValidation);
     RunTest("Config presenter & per-monitor anchor persistence round-trip", TestConfigPersistenceRoundTrip);
     RunTest("Per-monitor registry, overlay opt-out & legacy flip migration", TestMonitorRegistryAndLegacyMigration);
+    RunTest("Watermark-only legacy configuration migration", TestWatermarkOnlyConfiguration);
+    RunTest("Persistent watermark lifecycle and monitor policy", TestPersistentWatermarkLifecycle);
+    RunTest("Settings native typography, control fit, DPI changes, and unsaved state",
+            TestSettingsTypographyAndDpiLayout);
     RunTest("PresenterWindow layout, speech advancement & manual line seek", TestPresenterWindowAndControllerIntegration);
     RunTest("Vosk DLL loading & PresenterController close/reopen lifecycle", TestVoskDllAndPresenterControllerLifecycle);
 

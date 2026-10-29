@@ -17,10 +17,7 @@ constexpr UINT WM_OVERLAY_HIDE = WM_USER + 201;
 constexpr UINT WM_OVERLAY_UPDATE = WM_USER + 202;
 
 // Timer IDs
-constexpr UINT_PTR TIMER_OVERLAY_ANIMATION = 10;
-constexpr UINT_PTR TIMER_OVERLAY_AUTOHIDE = 11;
 constexpr UINT_PTR TIMER_OVERLAY_DODGE = 12;
-constexpr UINT TIMER_ANIMATION_INTERVAL_MS = 16;  // ~60 FPS
 constexpr UINT TIMER_DODGE_INTERVAL_MS = 50;      // Check mouse position 20 times/sec
 
 // Overlay window displaying virtual desktop info
@@ -66,17 +63,8 @@ private:
     LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     // Rendering
-    bool CreateRenderResources();
-    void DiscardRenderResources();
-    void Render();
-    void RenderWatermark();  // Per-pixel alpha rendering for watermark mode
+    void RenderWatermark();
 
-    // Animation
-    void StartFadeIn();
-    void StartFadeOut();
-    void UpdateAnimation();
-    void OnAnimationTimer();
-    void OnAutoHideTimer();
     void OnDodgeTimer();
     OverlayPosition GetOppositeHorizontalPosition(OverlayPosition pos);
 
@@ -102,13 +90,6 @@ private:
     // Settings and state
     OverlaySettings m_settings;
     OverlayRuntimeState m_state;
-
-    // Render resources
-    ComPtr<ID2D1HwndRenderTarget> m_renderTarget;
-    ComPtr<ID2D1SolidColorBrush> m_textBrush;
-    ComPtr<ID2D1SolidColorBrush> m_backgroundBrush;
-    ComPtr<ID2D1SolidColorBrush> m_borderBrush;
-    ComPtr<IDWriteTextFormat> m_textFormat;
 
     // Calculated dimensions
     int m_windowWidth = 200;

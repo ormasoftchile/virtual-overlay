@@ -262,12 +262,9 @@ bool App::InitOverlay() {
 
     OverlaySettings overlaySettings;
     overlaySettings.enabled = config.overlay.enabled;
-    overlaySettings.mode = config.overlay.mode;
     overlaySettings.position = config.overlay.position;
     overlaySettings.monitor = config.overlay.monitor;
     overlaySettings.format = config.overlay.format;
-    overlaySettings.autoHide = config.overlay.autoHide;
-    overlaySettings.autoHideDelayMs = config.overlay.autoHideDelayMs;
     
     overlaySettings.watermarkFontSize = config.overlay.watermarkFontSize;
     overlaySettings.watermarkOpacity = config.overlay.watermarkOpacity;
@@ -277,23 +274,10 @@ bool App::InitOverlay() {
     overlaySettings.dodgeOnHover = config.overlay.dodgeOnHover;
     overlaySettings.dodgeProximity = config.overlay.dodgeProximity;
     
-    overlaySettings.style.backdrop = config.overlay.style.blur;
-    overlaySettings.style.tintColor = config.overlay.style.tintColor;
-    overlaySettings.style.tintOpacity = config.overlay.style.tintOpacity;
-    overlaySettings.style.cornerRadius = config.overlay.style.cornerRadius;
     overlaySettings.style.padding = config.overlay.style.padding;
-    overlaySettings.style.borderWidth = config.overlay.style.borderWidth;
-    overlaySettings.style.borderColor = config.overlay.style.borderColor;
     
     overlaySettings.text.fontFamily = config.overlay.text.fontFamily;
-    overlaySettings.text.fontSize = config.overlay.text.fontSize;
     overlaySettings.text.fontWeight = config.overlay.text.fontWeight;
-    overlaySettings.text.color = config.overlay.text.color;
-    
-    overlaySettings.animation.fadeInDurationMs = config.overlay.animation.fadeInDurationMs;
-    overlaySettings.animation.fadeOutDurationMs = config.overlay.animation.fadeOutDurationMs;
-    overlaySettings.animation.slideIn = config.overlay.animation.slideIn;
-    overlaySettings.animation.slideDistance = config.overlay.animation.slideDistance;
     
     OverlayWindow::Instance().ApplySettings(overlaySettings);
 
@@ -306,8 +290,8 @@ bool App::InitOverlay() {
     SetTimer(m_hMainWnd, TIMER_DESKTOP_POLL, TIMER_DESKTOP_POLL_MS, nullptr);
     LOG_INFO("Started desktop polling timer");
 
-    if (config.overlay.mode == OverlayMode::Watermark && config.overlay.enabled) {
-        LOG_INFO("Watermark mode enabled, showing overlay on startup");
+    if (config.overlay.enabled) {
+        LOG_INFO("Watermark enabled, showing overlay on startup");
         DesktopInfo desktopInfo;
         if (VirtualDesktop::Instance().GetCurrentDesktop(desktopInfo)) {
             LOG_INFO("Current desktop: index=%d, name=%ws", desktopInfo.index, desktopInfo.name.c_str());
@@ -390,12 +374,9 @@ void App::OnSettingsChanged() {
     if (m_overlayEnabled) {
         OverlaySettings overlaySettings;
         overlaySettings.enabled = config.overlay.enabled;
-        overlaySettings.mode = config.overlay.mode;
         overlaySettings.position = config.overlay.position;
         overlaySettings.monitor = config.overlay.monitor;
         overlaySettings.format = config.overlay.format;
-        overlaySettings.autoHide = config.overlay.autoHide;
-        overlaySettings.autoHideDelayMs = config.overlay.autoHideDelayMs;
         
         overlaySettings.watermarkFontSize = config.overlay.watermarkFontSize;
         overlaySettings.watermarkOpacity = config.overlay.watermarkOpacity;
@@ -405,27 +386,14 @@ void App::OnSettingsChanged() {
         overlaySettings.dodgeOnHover = config.overlay.dodgeOnHover;
         overlaySettings.dodgeProximity = config.overlay.dodgeProximity;
         
-        overlaySettings.style.backdrop = config.overlay.style.blur;
-        overlaySettings.style.tintColor = config.overlay.style.tintColor;
-        overlaySettings.style.tintOpacity = config.overlay.style.tintOpacity;
-        overlaySettings.style.cornerRadius = config.overlay.style.cornerRadius;
         overlaySettings.style.padding = config.overlay.style.padding;
-        overlaySettings.style.borderWidth = config.overlay.style.borderWidth;
-        overlaySettings.style.borderColor = config.overlay.style.borderColor;
         
         overlaySettings.text.fontFamily = config.overlay.text.fontFamily;
-        overlaySettings.text.fontSize = config.overlay.text.fontSize;
         overlaySettings.text.fontWeight = config.overlay.text.fontWeight;
-        overlaySettings.text.color = config.overlay.text.color;
-        
-        overlaySettings.animation.fadeInDurationMs = config.overlay.animation.fadeInDurationMs;
-        overlaySettings.animation.fadeOutDurationMs = config.overlay.animation.fadeOutDurationMs;
-        overlaySettings.animation.slideIn = config.overlay.animation.slideIn;
-        overlaySettings.animation.slideDistance = config.overlay.animation.slideDistance;
         
         OverlayWindow::Instance().ApplySettings(overlaySettings);
         
-        if (config.overlay.mode == OverlayMode::Watermark && config.overlay.enabled) {
+        if (config.overlay.enabled) {
             DesktopInfo desktopInfo;
             if (VirtualDesktop::Instance().GetCurrentDesktop(desktopInfo)) {
                 OverlayWindow::Instance().Show(desktopInfo.index, desktopInfo.name);

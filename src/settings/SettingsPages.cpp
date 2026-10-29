@@ -97,17 +97,6 @@ static LRESULT CALLBACK PageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             int wmId = LOWORD(wParam);
             int wmEvent = HIWORD(wParam);
             
-            // Handle mode combo change - show/hide controls based on mode
-            if (wmId == IDC_OVL_MODE && wmEvent == CBN_SELCHANGE) {
-                LRESULT mode = SendDlgItemMessageW(hwnd, IDC_OVL_MODE, CB_GETCURSEL, 0, 0);
-                bool isWatermark = (mode == 1); // 0=Notification, 1=Watermark
-                int showCmd = isWatermark ? SW_HIDE : SW_SHOW;
-                ShowWindow(GetDlgItem(hwnd, IDC_OVL_AUTOHIDE), showCmd);
-                ShowWindow(GetDlgItem(hwnd, IDC_OVL_AUTOHIDE_DELAY), showCmd);
-                ShowWindow(GetDlgItem(hwnd, IDC_OVL_AUTOHIDE_MS_LABEL), showCmd);
-                return 0;
-            }
-
             // Handle Presenter microphone selection change -> update channel combo
             if (wmId == IDC_PRES_MIC_COMBO && wmEvent == CBN_SELCHANGE) {
                 LRESULT sel = SendDlgItemMessageW(hwnd, IDC_PRES_MIC_COMBO, CB_GETCURSEL, 0, 0);
@@ -328,7 +317,8 @@ HWND SettingsPages::CreateLink(HWND hParent, HINSTANCE hInstance, int id, const 
 
 void SettingsPages::SetControlFont(HWND hControl) {
     if (hControl) {
-        HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        HFONT hFont = reinterpret_cast<HFONT>(
+            SendMessageW(GetAncestor(hControl, GA_ROOT), WM_GETFONT, 0, 0));
         SendMessageW(hControl, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     }
 }
@@ -413,13 +403,7 @@ HWND SettingsPages::CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const R
     int ctrlH = 20;
     int spacing = 24;
 
-    CreateCheckbox(hPage, hInstance, IDC_OVL_ENABLE, L"Enable overlay", x, y, 150, ctrlH);
-    y += spacing;
-
-    CreateLabel(hPage, hInstance, 0, L"Mode:", x, y + 2, labelW, ctrlH);
-    HWND hMode = CreateComboBox(hPage, hInstance, IDC_OVL_MODE, x + labelW, y, ctrlW, 100);
-    SendMessageW(hMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Notification"));
-    SendMessageW(hMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Watermark"));
+    CreateCheckbox(hPage, hInstance, IDC_OVL_ENABLE, L"Enable watermark", x, y, 150, ctrlH);
     y += spacing;
 
     CreateLabel(hPage, hInstance, 0, L"Position:", x, y + 2, labelW, ctrlH);
@@ -444,17 +428,17 @@ HWND SettingsPages::CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const R
     CreateEdit(hPage, hInstance, IDC_OVL_FORMAT, x + labelW, y, ctrlW, ctrlH);
     y += spacing;
 
-    CreateLabel(hPage, hInstance, 0, L"WM Size:", x, y + 2, labelW, ctrlH);
+    CreateLabel(hPage, hInstance, 0, L"Font size:", x, y + 2, labelW, ctrlH);
     CreateSlider(hPage, hInstance, IDC_OVL_WATERMARK_SIZE, x + labelW, y, ctrlW, 25, 24, 144);
     CreateLabel(hPage, hInstance, IDC_OVL_WATERMARK_SIZE_LABEL, L"72", x + labelW + ctrlW + 10, y + 2, 40, ctrlH);
     y += spacing;
 
-    CreateLabel(hPage, hInstance, 0, L"WM Opacity:", x, y + 2, labelW, ctrlH);
+    CreateLabel(hPage, hInstance, 0, L"Opacity:", x, y + 2, labelW, ctrlH);
     CreateSlider(hPage, hInstance, IDC_OVL_WATERMARK_OPACITY, x + labelW, y, ctrlW, 25, 10, 100);
     CreateLabel(hPage, hInstance, IDC_OVL_WATERMARK_OPACITY_LABEL, L"25%", x + labelW + ctrlW + 10, y + 2, 40, ctrlH);
     y += spacing;
 
-    CreateLabel(hPage, hInstance, 0, L"WM Color:", x, y + 2, labelW, ctrlH);
+    CreateLabel(hPage, hInstance, 0, L"Text color:", x, y + 2, labelW, ctrlH);
     CreateButton(hPage, hInstance, IDC_OVL_WATERMARK_COLOR_BTN, L"Choose...", x + labelW, y, 80, ctrlH);
     CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"", 
         WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
@@ -462,11 +446,6 @@ HWND SettingsPages::CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const R
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_OVL_WATERMARK_COLOR)), hInstance, nullptr);
     y += spacing;
 
-    CreateCheckbox(hPage, hInstance, IDC_OVL_AUTOHIDE, L"Auto-hide after", x, y, 100, ctrlH);
-    CreateEdit(hPage, hInstance, IDC_OVL_AUTOHIDE_DELAY, x + 105, y, 50, ctrlH);
-    CreateLabel(hPage, hInstance, IDC_OVL_AUTOHIDE_MS_LABEL, L"ms", x + 160, y + 2, 30, ctrlH);
-    y += spacing;
-    
     CreateCheckbox(hPage, hInstance, IDC_OVL_DODGE, L"Dodge cursor", x, y, 100, ctrlH);
     CreateSlider(hPage, hInstance, IDC_OVL_DODGE_PROXIMITY, x + 105, y, 100, ctrlH, 20, 200);
     CreateLabel(hPage, hInstance, IDC_OVL_DODGE_PROXIMITY_LABEL, L"100px", x + 210, y + 2, 40, ctrlH);
@@ -507,7 +486,6 @@ void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config,
     if (!hPage) return;
 
     CheckDlgButton(hPage, IDC_OVL_ENABLE, config.enabled ? BST_CHECKED : BST_UNCHECKED);
-    SendDlgItemMessageW(hPage, IDC_OVL_MODE, CB_SETCURSEL, static_cast<int>(config.mode), 0);
     SendDlgItemMessageW(hPage, IDC_OVL_POSITION, CB_SETCURSEL, static_cast<int>(config.position), 0);
     SendDlgItemMessageW(hPage, IDC_OVL_MONITOR, CB_SETCURSEL, static_cast<int>(config.monitor), 0);
     SetDlgItemTextW(hPage, IDC_OVL_FORMAT, config.format.c_str());
@@ -529,8 +507,6 @@ void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config,
         InvalidateRect(hColorPreview, nullptr, TRUE);
     }
 
-    CheckDlgButton(hPage, IDC_OVL_AUTOHIDE, config.autoHide ? BST_CHECKED : BST_UNCHECKED);
-    SetDlgItemInt(hPage, IDC_OVL_AUTOHIDE_DELAY, config.autoHideDelayMs, FALSE);
     
     CheckDlgButton(hPage, IDC_OVL_DODGE, config.dodgeOnHover ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(hPage, IDC_OVL_DODGE_PROXIMITY, TBM_SETPOS, TRUE, config.dodgeProximity);
@@ -538,12 +514,6 @@ void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config,
     swprintf_s(proxText, L"%dpx", config.dodgeProximity);
     SetDlgItemTextW(hPage, IDC_OVL_DODGE_PROXIMITY_LABEL, proxText);
     
-    bool isWatermark = (config.mode == OverlayMode::Watermark);
-    int showCmd = isWatermark ? SW_HIDE : SW_SHOW;
-    ShowWindow(GetDlgItem(hPage, IDC_OVL_AUTOHIDE), showCmd);
-    ShowWindow(GetDlgItem(hPage, IDC_OVL_AUTOHIDE_DELAY), showCmd);
-    ShowWindow(GetDlgItem(hPage, IDC_OVL_AUTOHIDE_MS_LABEL), showCmd);
-
     const auto& mons = Monitor::Instance().GetMonitors();
     for (size_t i = 0; i < mons.size() && i < IDC_OVL_WM_MONITOR_MAX; ++i) {
         bool shown = GetMonitorSettings(monitors, mons[i]).showOverlay;
@@ -556,11 +526,6 @@ void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config, Monit
     if (!hPage) return;
 
     config.enabled = IsDlgButtonChecked(hPage, IDC_OVL_ENABLE) == BST_CHECKED;
-
-    LRESULT modeResult = SendDlgItemMessageW(hPage, IDC_OVL_MODE, CB_GETCURSEL, 0, 0);
-    if (modeResult != CB_ERR && modeResult >= 0) {
-        config.mode = static_cast<OverlayMode>(modeResult);
-    }
 
     LRESULT posResult = SendDlgItemMessageW(hPage, IDC_OVL_POSITION, CB_GETCURSEL, 0, 0);
     if (posResult != CB_ERR && posResult >= 0) {
@@ -584,8 +549,6 @@ void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config, Monit
 
     config.watermarkColor = s_watermarkColor;
 
-    config.autoHide = IsDlgButtonChecked(hPage, IDC_OVL_AUTOHIDE) == BST_CHECKED;
-    config.autoHideDelayMs = GetDlgItemInt(hPage, IDC_OVL_AUTOHIDE_DELAY, nullptr, FALSE);
     
     config.dodgeOnHover = IsDlgButtonChecked(hPage, IDC_OVL_DODGE) == BST_CHECKED;
     config.dodgeProximity = static_cast<int>(SendDlgItemMessageW(hPage, IDC_OVL_DODGE_PROXIMITY, TBM_GETPOS, 0, 0));
@@ -757,7 +720,7 @@ HWND SettingsPages::CreatePresenterPage(HWND hParent, HINSTANCE hInstance, const
 
     // Input channel selector
     CreateLabel(hPage, hInstance, 0, L"Input channel:", x, y + 2, labelW, ctrlH);
-    CreateComboBox(hPage, hInstance, IDC_PRES_CHANNEL_COMBO, x + labelW, y, 220, 150);
+    CreateComboBox(hPage, hInstance, IDC_PRES_CHANNEL_COMBO, x + labelW, y, 320, 150);
     y += spacing;
 
     // Font size slider
@@ -780,7 +743,7 @@ HWND SettingsPages::CreatePresenterPage(HWND hParent, HINSTANCE hInstance, const
 
     // Lines layout
     CreateLabel(hPage, hInstance, 0, L"Visible lines:", x, y + 2, labelW, ctrlH);
-    HWND hLines = CreateComboBox(hPage, hInstance, IDC_PRES_LINES_COMBO, x + labelW, y, 220, 150);
+    HWND hLines = CreateComboBox(hPage, hInstance, IDC_PRES_LINES_COMBO, x + labelW, y, 320, 150);
     SendMessageW(hLines, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Current + 1 Upcoming"));
     SendMessageW(hLines, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Current + 2 Upcoming"));
     SendMessageW(hLines, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"1 Previous + Current + 1 Upcoming"));
@@ -799,13 +762,13 @@ HWND SettingsPages::CreatePresenterPage(HWND hParent, HINSTANCE hInstance, const
     CreateLabel(hPage, hInstance, IDC_PRES_MODEL_STATUS, L"Checking...", x + labelW, y + 2, 330, ctrlH);
     y += 22;
 
-    CreateButton(hPage, hInstance, IDC_PRES_DOWNLOAD_MODEL, L"Download English Model (~40 MB)...", x + labelW, y, 215, 23);
-    CreateButton(hPage, hInstance, IDC_PRES_BROWSE_MODEL, L"Browse Folder...", x + labelW + 222, y, 105, 23);
+    CreateButton(hPage, hInstance, IDC_PRES_DOWNLOAD_MODEL, L"Download English Model (~40 MB)...", x + labelW, y, 245, 23);
+    CreateButton(hPage, hInstance, IDC_PRES_BROWSE_MODEL, L"Browse Folder...", x + labelW + 253, y, 120, 23);
     y += 28;
 
     CreateLabel(hPage, hInstance, 0,
                 L"Tip: Hold Alt + left-drag anywhere on the caption to position the reading line right above your camera lens.",
-                x, y, 440, 32);
+                x, y, 560, 40);
 
     return hPage;
 }

@@ -1,5 +1,4 @@
 #include "OverlayWindow.h"
-#include "AcrylicHelper.h"
 #include "../utils/D2DRenderer.h"
 #include "../utils/Logger.h"
 #include "../utils/Monitor.h"
@@ -78,19 +77,6 @@ bool OverlayWindow::Init(HINSTANCE hInstance) {
         return false;
     }
 
-    // Create render resources
-    if (!CreateRenderResources()) {
-        LOG_WARN("Failed to create initial render resources");
-    }
-
-    // Apply blur effect (only for notification mode)
-    if (m_settings.mode != OverlayMode::Watermark) {
-        AcrylicHelper::ApplyAcrylic(m_hwnd, m_settings.style.tintColor, m_settings.style.tintOpacity);
-    }
-
-    // Don't call SetLayeredWindowAttributes here - it prevents UpdateLayeredWindow from working
-    // It will be set in StartFadeIn for notification mode, or not at all for watermark mode
-
     m_initialized = true;
     LOG_INFO("OverlayWindow initialized");
     return true;
@@ -101,11 +87,7 @@ void OverlayWindow::Shutdown() {
         return;
     }
 
-    KillTimer(m_hwnd, TIMER_OVERLAY_ANIMATION);
-    KillTimer(m_hwnd, TIMER_OVERLAY_AUTOHIDE);
     KillTimer(m_hwnd, TIMER_OVERLAY_DODGE);
-
-    DiscardRenderResources();
 
     if (m_hwnd) {
         DestroyWindow(m_hwnd);
@@ -117,9 +99,8 @@ void OverlayWindow::Shutdown() {
 }
 
 void OverlayWindow::Show(int desktopIndex, const std::wstring& desktopName) {
-    LOG_DEBUG("OverlayWindow::Show called: index=%d, name=%ws, initialized=%d, enabled=%d, mode=%d",
-              desktopIndex, desktopName.c_str(), m_initialized ? 1 : 0, m_settings.enabled ? 1 : 0,
-              static_cast<int>(m_settings.mode));
+    LOG_DEBUG("OverlayWindow::Show called: index=%d, name=%ws, initialized=%d, enabled=%d",
+              desktopIndex, desktopName.c_str(), m_initialized ? 1 : 0, m_settings.enabled ? 1 : 0);
     
     if (!m_initialized || !m_settings.enabled) {
         LOG_WARN("OverlayWindow::Show returning early: initialized=%d, enabled=%d",
@@ -141,59 +122,23 @@ void OverlayWindow::Show(int desktopIndex, const std::wstring& desktopName) {
     // hidden until the target moves to a screen that allows it again.
     const bool allowed = ResolveTargetMonitor() != nullptr;
 
-    // Watermark mode: always visible, no animation, use per-pixel alpha
-    if (m_settings.mode == OverlayMode::Watermark) {
-        m_state.state = OverlayState::Visible;
-        m_state.opacity = 1.0f;
-        m_state.slideOffset = 0.0f;
-        m_hiddenByPolicy = !allowed;
-        if (allowed) {
-            // Show window first
-            ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
-            SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, 
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            // Use UpdateLayeredWindow for true per-pixel alpha
-            RenderWatermark();
-            LOG_DEBUG("Watermark Show: using per-pixel alpha");
-        } else {
-            // Keep the logical "visible" state so CheckPosition re-evaluates and
-            // the watermark can reappear on a screen that allows it.
-            ShowWindow(m_hwnd, SW_HIDE);
-            LOG_DEBUG("Watermark Show: target monitor opted out, staying hidden");
-        }
-        
-        // Start dodge timer if enabled
-        if (m_settings.dodgeOnHover) {
-            SetTimer(m_hwnd, TIMER_OVERLAY_DODGE, TIMER_DODGE_INTERVAL_MS, nullptr);
-        }
-        
-        return;
+    m_state.state = OverlayState::Visible;
+    m_hiddenByPolicy = !allowed;
+    if (allowed) {
+        ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
+        SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        RenderWatermark();
+        LOG_DEBUG("Watermark Show: using per-pixel alpha");
+    } else {
+        // Keep the logical visible state so an allowed target can show it again.
+        ShowWindow(m_hwnd, SW_HIDE);
+        LOG_DEBUG("Watermark Show: target monitor opted out, staying hidden");
     }
 
-    // Notification mode: never show on an opted-out screen
-    if (!allowed) {
-        LOG_DEBUG("Overlay Show: target monitor opted out, staying hidden");
-        return;
+    if (m_settings.dodgeOnHover) {
+        SetTimer(m_hwnd, TIMER_OVERLAY_DODGE, TIMER_DODGE_INTERVAL_MS, nullptr);
     }
-
-    // Notification mode: fade in/out
-    // If already visible or fading in, just refresh
-    if (m_state.state == OverlayState::Visible || m_state.state == OverlayState::FadeIn) {
-        // Force redraw with new text/position
-        InvalidateRect(m_hwnd, nullptr, TRUE);
-        if (m_settings.autoHide) {
-            m_state.visibleStartTime = GetTickCount();
-        }
-        return;
-    }
-
-    // If fading out, stop and restart fade-in
-    if (m_state.state == OverlayState::FadeOut) {
-        KillTimer(m_hwnd, TIMER_OVERLAY_ANIMATION);
-    }
-
-    // Start fade-in
-    StartFadeIn();
 }
 
 void OverlayWindow::Hide() {
@@ -201,28 +146,21 @@ void OverlayWindow::Hide() {
         return;
     }
 
-    if (m_state.state == OverlayState::Hidden || m_state.state == OverlayState::FadeOut) {
+    if (m_state.state == OverlayState::Hidden) {
         return;
     }
 
     m_hiddenByPolicy = false;
 
-    // Watermark mode: immediate hide, no animation
-    if (m_settings.mode == OverlayMode::Watermark) {
-        KillTimer(m_hwnd, TIMER_OVERLAY_DODGE);
-        ShowWindow(m_hwnd, SW_HIDE);
-        m_state.state = OverlayState::Hidden;
-        if (m_isDodging) {
-            m_settings.position = m_originalPosition;
-            m_isDodging = false;
-        }
-        m_dodgeMonitorRect = {};
-        LOG_DEBUG("Watermark hidden immediately");
-        return;
+    KillTimer(m_hwnd, TIMER_OVERLAY_DODGE);
+    ShowWindow(m_hwnd, SW_HIDE);
+    m_state.state = OverlayState::Hidden;
+    if (m_isDodging) {
+        m_settings.position = m_originalPosition;
+        m_isDodging = false;
     }
-
-    // Notification mode: fade out
-    StartFadeOut();
+    m_dodgeMonitorRect = {};
+    LOG_DEBUG("Watermark hidden immediately");
 }
 
 void OverlayWindow::OnDisplayChanged() {
@@ -242,12 +180,7 @@ void OverlayWindow::OnDisplayChanged() {
     UpdateWindowPosition();
 
     // Force redraw
-    if (m_settings.mode == OverlayMode::Watermark) {
-        RenderWatermark();
-    } else {
-        InvalidateRect(m_hwnd, nullptr, TRUE);
-        UpdateWindow(m_hwnd);
-    }
+    RenderWatermark();
 }
 
 void OverlayWindow::CheckPosition() {
@@ -259,15 +192,11 @@ void OverlayWindow::CheckPosition() {
     // out. The watermark keeps its logical "visible" state so it reappears as
     // soon as the target screen allows it again.
     if (ResolveTargetMonitor() == nullptr) {
-        if (m_settings.mode == OverlayMode::Watermark) {
-            if (!m_hiddenByPolicy) {
-                m_hiddenByPolicy = true;
-                ShowWindow(m_hwnd, SW_HIDE);
-                LOG_DEBUG("Watermark hidden: target monitor opted out");
-            }
-            return;
+        if (!m_hiddenByPolicy) {
+            m_hiddenByPolicy = true;
+            ShowWindow(m_hwnd, SW_HIDE);
+            LOG_DEBUG("Watermark hidden: target monitor opted out");
         }
-        Hide();  // Notification mode drops entirely
         return;
     }
 
@@ -275,12 +204,7 @@ void OverlayWindow::CheckPosition() {
         m_hiddenByPolicy = false;
         UpdateWindowPosition();
         ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
-        if (m_settings.mode == OverlayMode::Watermark) {
-            RenderWatermark();
-        } else {
-            InvalidateRect(m_hwnd, nullptr, TRUE);
-            UpdateWindow(m_hwnd);
-        }
+        RenderWatermark();
         LOG_DEBUG("Overlay reappeared: target monitor allows overlay again");
     }
 
@@ -309,57 +233,28 @@ void OverlayWindow::CheckPosition() {
             LOG_INFO("OverlayWindow: correcting position from (%ld,%ld) to (%d,%d)",
                      rcWindow.left, rcWindow.top, expectedX, expectedY);
             UpdateWindowPosition();
-            if (m_settings.mode == OverlayMode::Watermark) {
-                RenderWatermark();
-            } else {
-                InvalidateRect(m_hwnd, nullptr, TRUE);
-                UpdateWindow(m_hwnd);
-            }
+            RenderWatermark();
         }
     }
 }
 
 void OverlayWindow::ApplySettings(const OverlaySettings& settings) {
-    LOG_INFO("OverlayWindow::ApplySettings - mode=%d, position=%d, monitor=%d, enabled=%d",
-             static_cast<int>(settings.mode), static_cast<int>(settings.position), 
+    LOG_INFO("OverlayWindow::ApplySettings - position=%d, monitor=%d, enabled=%d",
+             static_cast<int>(settings.position),
              static_cast<int>(settings.monitor), settings.enabled ? 1 : 0);
     
+    if (m_hwnd) KillTimer(m_hwnd, TIMER_OVERLAY_DODGE);
     m_isDodging = false;
     m_dodgeMonitorRect = {};
     m_hiddenByPolicy = false;
     m_settings = settings;
 
-    // Reset resources that depend on settings (font size, opacity)
-    m_textFormat.Reset();
-    m_textBrush.Reset();
-
-    // Reapply blur effect (not for watermark mode - needs transparent background)
-    if (m_hwnd) {
-        if (settings.mode == OverlayMode::Watermark) {
-            AcrylicHelper::RemoveBackdrop(m_hwnd);
+    if (m_initialized) {
+        if (settings.enabled) {
+            Show(m_state.currentDesktopIndex, m_state.currentDesktopName);
         } else {
-            switch (settings.style.backdrop) {
-                case BlurType::Acrylic:
-                    AcrylicHelper::ApplyAcrylic(m_hwnd, settings.style.tintColor, settings.style.tintOpacity);
-                    break;
-                case BlurType::Mica:
-                    AcrylicHelper::ApplyMica(m_hwnd);
-                    break;
-                case BlurType::Solid:
-                    AcrylicHelper::RemoveBackdrop(m_hwnd);
-                    break;
-            }
+            Hide();
         }
-    }
-
-    // Force redraw
-    if (IsVisible()) {
-        InvalidateRect(m_hwnd, nullptr, FALSE);
-    }
-
-    // Watermark mode: show immediately with current desktop info
-    if (settings.mode == OverlayMode::Watermark && settings.enabled) {
-        Show(m_state.currentDesktopIndex, m_state.currentDesktopName);
     }
 }
 
@@ -386,25 +281,13 @@ LRESULT OverlayWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(hwnd, &ps);
-            Render();
             EndPaint(hwnd, &ps);
             return 0;
         }
 
         case WM_TIMER:
-            if (wParam == TIMER_OVERLAY_ANIMATION) {
-                OnAnimationTimer();
-            } else if (wParam == TIMER_OVERLAY_AUTOHIDE) {
-                OnAutoHideTimer();
-            } else if (wParam == TIMER_OVERLAY_DODGE) {
+            if (wParam == TIMER_OVERLAY_DODGE) {
                 OnDodgeTimer();
-            }
-            return 0;
-
-        case WM_SIZE:
-            if (!m_updatingPosition) {
-                DiscardRenderResources();
-                CreateRenderResources();
             }
             return 0;
 
@@ -418,166 +301,6 @@ LRESULT OverlayWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
-}
-
-bool OverlayWindow::CreateRenderResources() {
-    if (!m_hwnd) return false;
-
-    auto& renderer = D2DRenderer::Instance();
-
-    // Create render target if needed
-    if (!m_renderTarget) {
-        ID2D1HwndRenderTarget* pRT = nullptr;
-        if (!renderer.CreateRenderTarget(m_hwnd, &pRT)) {
-            return false;
-        }
-        m_renderTarget.Attach(pRT);
-    }
-
-    // Create text brush - watermark mode uses specific opacity
-    if (!m_textBrush) {
-        float textOpacity = (m_settings.mode == OverlayMode::Watermark) 
-            ? m_settings.watermarkOpacity : 1.0f;
-        D2D1_COLOR_F textColor = D2DRenderer::ColorFromRGB(m_settings.text.color, textOpacity);
-        m_renderTarget->CreateSolidColorBrush(textColor, m_textBrush.GetAddressOf());
-    }
-
-    // Create background brush (not used in watermark mode but create anyway)
-    if (!m_backgroundBrush) {
-        D2D1_COLOR_F bgColor = D2DRenderer::ColorFromRGB(
-            m_settings.style.tintColor, 
-            m_settings.style.tintOpacity
-        );
-        m_renderTarget->CreateSolidColorBrush(bgColor, m_backgroundBrush.GetAddressOf());
-    }
-
-    // Create border brush
-    if (!m_borderBrush) {
-        D2D1_COLOR_F borderColor = D2DRenderer::ColorFromRGB(m_settings.style.borderColor);
-        m_renderTarget->CreateSolidColorBrush(borderColor, m_borderBrush.GetAddressOf());
-    }
-
-    // Create text format - watermark mode uses larger font
-    if (!m_textFormat) {
-        IDWriteTextFormat* pFormat = nullptr;
-        DWRITE_FONT_WEIGHT weight = static_cast<DWRITE_FONT_WEIGHT>(m_settings.text.fontWeight);
-        int fontSize = (m_settings.mode == OverlayMode::Watermark)
-            ? m_settings.watermarkFontSize : m_settings.text.fontSize;
-        if (renderer.CreateTextFormat(
-            m_settings.text.fontFamily,
-            static_cast<float>(fontSize),
-            weight,
-            &pFormat
-        )) {
-            m_textFormat.Attach(pFormat);
-        }
-    }
-
-    return true;
-}
-
-void OverlayWindow::DiscardRenderResources() {
-    m_textFormat.Reset();
-    m_borderBrush.Reset();
-    m_backgroundBrush.Reset();
-    m_textBrush.Reset();
-    m_renderTarget.Reset();
-}
-
-void OverlayWindow::Render() {
-    if (!m_renderTarget) {
-        if (!CreateRenderResources()) {
-            return;
-        }
-    }
-
-    m_renderTarget->BeginDraw();
-    
-    // Clear background - use black for watermark mode (will be color-keyed out)
-    if (m_settings.mode == OverlayMode::Watermark) {
-        m_renderTarget->Clear(D2D1::ColorF(0, 0, 0, 1.0f));  // Solid black (color key)
-    } else {
-        m_renderTarget->Clear(D2D1::ColorF(0, 0, 0, 0));  // Transparent
-    }
-    m_renderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
-
-    D2D1_SIZE_F size = m_renderTarget->GetSize();
-    float padding = static_cast<float>(m_settings.style.padding);
-    float radius = static_cast<float>(m_settings.style.cornerRadius);
-
-    // In watermark mode, skip background and border
-    if (m_settings.mode != OverlayMode::Watermark) {
-        // Background rounded rect
-        D2D1_ROUNDED_RECT bgRect = D2D1::RoundedRect(
-            D2D1::RectF(0, 0, size.width, size.height),
-            radius, radius
-        );
-
-        // Draw background (if solid style or as fallback)
-        if (m_backgroundBrush) {
-            m_renderTarget->FillRoundedRectangle(bgRect, m_backgroundBrush.Get());
-        }
-
-        // Draw border
-        if (m_borderBrush && m_settings.style.borderWidth > 0) {
-            m_renderTarget->DrawRoundedRectangle(bgRect, m_borderBrush.Get(), 
-                static_cast<float>(m_settings.style.borderWidth));
-        }
-    }
-
-    // Draw text
-    if (m_textBrush && m_textFormat) {
-        std::wstring displayText = FormatDisplayText();
-        
-        D2D1_RECT_F textRect = D2D1::RectF(
-            padding, 
-            padding + m_state.slideOffset,  // Apply slide offset
-            size.width - padding, 
-            size.height - padding + m_state.slideOffset
-        );
-
-        // In watermark mode, optionally draw a thin outline for readability (not a shadow fill)
-        if (m_settings.mode == OverlayMode::Watermark && m_settings.watermarkShadow) {
-            Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> outlineBrush;
-            m_renderTarget->CreateSolidColorBrush(
-                D2D1::ColorF(0, 0, 0, m_settings.watermarkOpacity * 0.7f),
-                outlineBrush.GetAddressOf()
-            );
-            if (outlineBrush) {
-                // Draw thin outline offsets
-                for (float dx = -1.0f; dx <= 1.0f; dx += 1.0f) {
-                    for (float dy = -1.0f; dy <= 1.0f; dy += 1.0f) {
-                        if (dx == 0 && dy == 0) continue;
-                        D2D1_RECT_F outlineRect = textRect;
-                        outlineRect.left += dx;
-                        outlineRect.top += dy;
-                        outlineRect.right += dx;
-                        outlineRect.bottom += dy;
-                        m_renderTarget->DrawText(
-                            displayText.c_str(),
-                            static_cast<UINT32>(displayText.length()),
-                            m_textFormat.Get(),
-                            outlineRect,
-                            outlineBrush.Get()
-                        );
-                    }
-                }
-            }
-        }
-
-        m_renderTarget->DrawText(
-            displayText.c_str(),
-            static_cast<UINT32>(displayText.length()),
-            m_textFormat.Get(),
-            textRect,
-            m_textBrush.Get()
-        );
-    }
-
-    HRESULT hr = m_renderTarget->EndDraw();
-    if (hr == D2DERR_RECREATE_TARGET) {
-        DiscardRenderResources();
-    }
 }
 
 void OverlayWindow::RenderWatermark() {
@@ -717,99 +440,6 @@ void OverlayWindow::RenderWatermark() {
     ReleaseDC(nullptr, hdcScreen);
 }
 
-void OverlayWindow::StartFadeIn() {
-    m_state.state = OverlayState::FadeIn;
-    m_state.stateStartTime = GetTickCount();
-    m_state.opacity = 0.0f;
-    m_state.slideOffset = m_settings.animation.slideIn ? 
-        static_cast<float>(-m_settings.animation.slideDistance) : 0.0f;
-
-    // Set layered window to use alpha blending for notification mode
-    SetLayeredWindowAttributes(m_hwnd, 0, 0, LWA_ALPHA);
-
-    // Show window
-    ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
-
-    // Start animation timer
-    SetTimer(m_hwnd, TIMER_OVERLAY_ANIMATION, TIMER_ANIMATION_INTERVAL_MS, nullptr);
-}
-
-void OverlayWindow::StartFadeOut() {
-    m_state.state = OverlayState::FadeOut;
-    m_state.stateStartTime = GetTickCount();
-
-    KillTimer(m_hwnd, TIMER_OVERLAY_AUTOHIDE);
-    SetTimer(m_hwnd, TIMER_OVERLAY_ANIMATION, TIMER_ANIMATION_INTERVAL_MS, nullptr);
-}
-
-void OverlayWindow::UpdateAnimation() {
-    DWORD now = GetTickCount();
-    DWORD elapsed = now - m_state.stateStartTime;
-
-    if (m_state.state == OverlayState::FadeIn) {
-        float duration = static_cast<float>(m_settings.animation.fadeInDurationMs);
-        float progress = std::min(elapsed / duration, 1.0f);
-
-        // Ease out quad: t * (2 - t)
-        float easedProgress = progress * (2.0f - progress);
-
-        m_state.opacity = easedProgress;
-        
-        if (m_settings.animation.slideIn) {
-            float startOffset = static_cast<float>(-m_settings.animation.slideDistance);
-            m_state.slideOffset = startOffset * (1.0f - easedProgress);
-        }
-
-        // Update window opacity
-        SetLayeredWindowAttributes(m_hwnd, 0, 
-            static_cast<BYTE>(m_state.opacity * 255.0f), LWA_ALPHA);
-        InvalidateRect(m_hwnd, nullptr, FALSE);
-
-        if (progress >= 1.0f) {
-            // Fade-in complete
-            KillTimer(m_hwnd, TIMER_OVERLAY_ANIMATION);
-            m_state.state = OverlayState::Visible;
-            m_state.opacity = 1.0f;
-            m_state.slideOffset = 0.0f;
-            m_state.visibleStartTime = now;
-
-            // Start auto-hide timer
-            if (m_settings.autoHide) {
-                SetTimer(m_hwnd, TIMER_OVERLAY_AUTOHIDE, 
-                    static_cast<UINT>(m_settings.autoHideDelayMs), nullptr);
-            }
-        }
-    } else if (m_state.state == OverlayState::FadeOut) {
-        float duration = static_cast<float>(m_settings.animation.fadeOutDurationMs);
-        float progress = std::min(elapsed / duration, 1.0f);
-
-        m_state.opacity = 1.0f - progress;
-
-        SetLayeredWindowAttributes(m_hwnd, 0, 
-            static_cast<BYTE>(m_state.opacity * 255.0f), LWA_ALPHA);
-
-        if (progress >= 1.0f) {
-            // Fade-out complete
-            KillTimer(m_hwnd, TIMER_OVERLAY_ANIMATION);
-            m_state.state = OverlayState::Hidden;
-            m_state.opacity = 0.0f;
-            ShowWindow(m_hwnd, SW_HIDE);
-        }
-    }
-}
-
-void OverlayWindow::OnAnimationTimer() {
-    UpdateAnimation();
-}
-
-void OverlayWindow::OnAutoHideTimer() {
-    KillTimer(m_hwnd, TIMER_OVERLAY_AUTOHIDE);
-    
-    if (m_state.state == OverlayState::Visible) {
-        StartFadeOut();
-    }
-}
-
 OverlayPosition OverlayWindow::GetOppositeHorizontalPosition(OverlayPosition pos) {
     switch (pos) {
         // Corner positions: horizontal dodge
@@ -862,11 +492,7 @@ void OverlayWindow::OnDodgeTimer() {
             m_dodgeMonitorRect = {};  // Clear stored monitor
             m_settings.position = m_originalPosition;
             UpdateWindowPosition();
-            if (m_settings.mode == OverlayMode::Watermark) {
-                RenderWatermark();
-            } else {
-                InvalidateRect(m_hwnd, nullptr, TRUE);
-            }
+            RenderWatermark();
             LOG_DEBUG("Dodge: returned to original position %d", 
                       static_cast<int>(m_settings.position));
         }
@@ -901,11 +527,7 @@ void OverlayWindow::OnDodgeTimer() {
             
             m_settings.position = GetOppositeHorizontalPosition(m_originalPosition);
             UpdateWindowPosition();
-            if (m_settings.mode == OverlayMode::Watermark) {
-                RenderWatermark();
-            } else {
-                InvalidateRect(m_hwnd, nullptr, TRUE);
-            }
+            RenderWatermark();
             LOG_DEBUG("Dodge: moved from %d to %d", 
                       static_cast<int>(m_originalPosition), 
                       static_cast<int>(m_settings.position));
@@ -939,7 +561,7 @@ HMONITOR OverlayWindow::ResolveTargetMonitor() const {
     // Honor per-monitor opt-outs (and the no-watermark-on-mirrored-screens rule)
     // via the shared per-monitor settings registry.
     if (const MonitorInfo* mon = Monitor::Instance().GetByHandle(hTargetMon)) {
-        if (!IsOverlayAllowedOn(Config::Instance().Get().monitors, *mon, m_settings.mode)) {
+        if (!IsOverlayAllowedOn(Config::Instance().Get().monitors, *mon)) {
             return nullptr;
         }
     }
@@ -1030,24 +652,15 @@ void OverlayWindow::UpdateWindowPosition() {
     if (!m_hwnd || m_updatingPosition) return;
     m_updatingPosition = true;
 
-    // Calculate content size based on mode and actual text
+    // Measure the watermark text using the existing character-width estimate.
     int contentWidth, contentHeight;
-    
-    if (m_settings.mode == OverlayMode::Watermark) {
-        // Watermark mode: measure actual text width
-        std::wstring displayText = FormatDisplayText();
-        size_t textLen = displayText.length();
-        if (textLen == 0) textLen = 10;  // Default assumption
-        
-        // Approximate character width is about 60% of font size for most fonts
-        float charWidth = m_settings.watermarkFontSize * 0.6f;
-        contentWidth = static_cast<int>(charWidth * textLen) + m_settings.style.padding * 2;
-        contentHeight = m_settings.watermarkFontSize + 20; // Font height + margin
-    } else {
-        // Notification mode: standard size
-        contentWidth = 200;  // Minimum width
-        contentHeight = 60;  // Minimum height
-    }
+    std::wstring displayText = FormatDisplayText();
+    size_t textLen = displayText.length();
+    if (textLen == 0) textLen = 10;
+
+    float charWidth = m_settings.watermarkFontSize * 0.6f;
+    contentWidth = static_cast<int>(charWidth * textLen) + m_settings.style.padding * 2;
+    contentHeight = m_settings.watermarkFontSize + 20;
 
     m_windowWidth = contentWidth + m_settings.style.padding * 2;
     m_windowHeight = contentHeight;
@@ -1058,10 +671,6 @@ void OverlayWindow::UpdateWindowPosition() {
 
     SetWindowPos(m_hwnd, HWND_TOPMOST, x, y, m_windowWidth, m_windowHeight, 
         SWP_NOACTIVATE);
-
-    // Recreate render target for new size
-    DiscardRenderResources();
-    CreateRenderResources();
 
     m_updatingPosition = false;
 }

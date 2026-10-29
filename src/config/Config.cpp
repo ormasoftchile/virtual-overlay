@@ -95,7 +95,7 @@ void SetMonitorSettings(MonitorSettingsMap& map, const MonitorInfo& mon, const P
     }
 }
 
-bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon, OverlayMode mode) {
+bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon) {
     const PerMonitorSettings* settings = FindMonitorSettings(map, mon);
     if (settings && !settings->showOverlay) {
         return false;
@@ -103,7 +103,7 @@ bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon, O
     // Watermark never lands on a mirrored (flipped) non-primary screen:
     // MirrorWindow captures and re-renders the screen content, so the text
     // would show up mirrored.
-    if (mode == OverlayMode::Watermark && settings && settings->flip && !mon.isPrimary) {
+    if (settings && settings->flip && !mon.isPrimary) {
         return false;
     }
     return true;
@@ -192,7 +192,12 @@ bool Config::Load(const std::wstring& filePath) {
         if (j.contains("overlay")) {
             auto& o = j["overlay"];
             if (o.contains("enabled")) m_config.overlay.enabled = o["enabled"].get<bool>();
-            if (o.contains("mode")) m_config.overlay.mode = StringToMode(o["mode"].get<std::string>());
+            if (o.contains("mode")) {
+                std::string legacyMode = o["mode"].get<std::string>();
+                if (legacyMode != "watermark") {
+                    LOG_INFO("Overlay mode '%s' is retired; using a persistent watermark", legacyMode.c_str());
+                }
+            }
             if (o.contains("position")) m_config.overlay.position = StringToPosition(o["position"].get<std::string>());
             if (o.contains("showDesktopNumber")) m_config.overlay.showDesktopNumber = o["showDesktopNumber"].get<bool>();
             if (o.contains("showDesktopName")) m_config.overlay.showDesktopName = o["showDesktopName"].get<bool>();
@@ -200,8 +205,6 @@ bool Config::Load(const std::wstring& filePath) {
                 std::string fmt = o["format"].get<std::string>();
                 m_config.overlay.format = Utf8ToWide(fmt);
             }
-            if (o.contains("autoHide")) m_config.overlay.autoHide = o["autoHide"].get<bool>();
-            if (o.contains("autoHideDelayMs")) m_config.overlay.autoHideDelayMs = o["autoHideDelayMs"].get<int>();
             if (o.contains("monitor")) m_config.overlay.monitor = StringToMonitor(o["monitor"].get<std::string>());
             
             // Watermark settings
@@ -217,13 +220,6 @@ bool Config::Load(const std::wstring& filePath) {
             // Parse style
             if (o.contains("style")) {
                 auto& s = o["style"];
-                if (s.contains("blur")) m_config.overlay.style.blur = StringToBlur(s["blur"].get<std::string>());
-                if (s.contains("tintColor")) m_config.overlay.style.tintColor = ParseColor(s["tintColor"].get<std::string>());
-                if (s.contains("tintOpacity")) m_config.overlay.style.tintOpacity = s["tintOpacity"].get<float>();
-                if (s.contains("cornerRadius")) m_config.overlay.style.cornerRadius = s["cornerRadius"].get<int>();
-                if (s.contains("borderColor")) m_config.overlay.style.borderColor = ParseColor(s["borderColor"].get<std::string>());
-                if (s.contains("borderWidth")) m_config.overlay.style.borderWidth = s["borderWidth"].get<int>();
-                if (s.contains("shadowEnabled")) m_config.overlay.style.shadowEnabled = s["shadowEnabled"].get<bool>();
                 if (s.contains("padding")) m_config.overlay.style.padding = s["padding"].get<int>();
             }
             
@@ -234,18 +230,7 @@ bool Config::Load(const std::wstring& filePath) {
                     std::string font = t["fontFamily"].get<std::string>();
                     m_config.overlay.text.fontFamily = Utf8ToWide(font);
                 }
-                if (t.contains("fontSize")) m_config.overlay.text.fontSize = t["fontSize"].get<int>();
                 if (t.contains("fontWeight")) m_config.overlay.text.fontWeight = t["fontWeight"].get<int>();
-                if (t.contains("color")) m_config.overlay.text.color = ParseColor(t["color"].get<std::string>());
-            }
-            
-            // Parse animation
-            if (o.contains("animation")) {
-                auto& a = o["animation"];
-                if (a.contains("fadeInDurationMs")) m_config.overlay.animation.fadeInDurationMs = a["fadeInDurationMs"].get<int>();
-                if (a.contains("fadeOutDurationMs")) m_config.overlay.animation.fadeOutDurationMs = a["fadeOutDurationMs"].get<int>();
-                if (a.contains("slideIn")) m_config.overlay.animation.slideIn = a["slideIn"].get<bool>();
-                if (a.contains("slideDistance")) m_config.overlay.animation.slideDistance = a["slideDistance"].get<int>();
             }
         }
 
@@ -389,13 +374,10 @@ bool Config::Save(const std::wstring& filePath) {
         
         // Overlay
         j["overlay"]["enabled"] = m_config.overlay.enabled;
-        j["overlay"]["mode"] = ModeToString(m_config.overlay.mode);
         j["overlay"]["position"] = PositionToString(m_config.overlay.position);
         j["overlay"]["showDesktopNumber"] = m_config.overlay.showDesktopNumber;
         j["overlay"]["showDesktopName"] = m_config.overlay.showDesktopName;
         j["overlay"]["format"] = WideToUtf8(m_config.overlay.format);
-        j["overlay"]["autoHide"] = m_config.overlay.autoHide;
-        j["overlay"]["autoHideDelayMs"] = m_config.overlay.autoHideDelayMs;
         j["overlay"]["monitor"] = MonitorToString(m_config.overlay.monitor);
         
         // Watermark settings
@@ -409,26 +391,11 @@ bool Config::Save(const std::wstring& filePath) {
         j["overlay"]["dodgeProximity"] = m_config.overlay.dodgeProximity;
         
         // Style
-        j["overlay"]["style"]["blur"] = BlurToString(m_config.overlay.style.blur);
-        j["overlay"]["style"]["tintColor"] = ColorToHex(m_config.overlay.style.tintColor);
-        j["overlay"]["style"]["tintOpacity"] = m_config.overlay.style.tintOpacity;
-        j["overlay"]["style"]["cornerRadius"] = m_config.overlay.style.cornerRadius;
-        j["overlay"]["style"]["borderColor"] = ColorToHex(m_config.overlay.style.borderColor);
-        j["overlay"]["style"]["borderWidth"] = m_config.overlay.style.borderWidth;
-        j["overlay"]["style"]["shadowEnabled"] = m_config.overlay.style.shadowEnabled;
         j["overlay"]["style"]["padding"] = m_config.overlay.style.padding;
         
         // Text
         j["overlay"]["text"]["fontFamily"] = WideToUtf8(m_config.overlay.text.fontFamily);
-        j["overlay"]["text"]["fontSize"] = m_config.overlay.text.fontSize;
         j["overlay"]["text"]["fontWeight"] = m_config.overlay.text.fontWeight;
-        j["overlay"]["text"]["color"] = ColorToHex(m_config.overlay.text.color);
-        
-        // Animation
-        j["overlay"]["animation"]["fadeInDurationMs"] = m_config.overlay.animation.fadeInDurationMs;
-        j["overlay"]["animation"]["fadeOutDurationMs"] = m_config.overlay.animation.fadeOutDurationMs;
-        j["overlay"]["animation"]["slideIn"] = m_config.overlay.animation.slideIn;
-        j["overlay"]["animation"]["slideDistance"] = m_config.overlay.animation.slideDistance;
         
         // Flip (per-monitor mirror)
         j["flip"]["enabled"] = m_config.flip.enabled;
@@ -528,11 +495,7 @@ bool Config::Validate() const {
 
 bool Config::Validate(const AppConfig& config) const {
     // Overlay validation
-    if (config.overlay.autoHideDelayMs < 500 || config.overlay.autoHideDelayMs > 10000) return false;
-    if (config.overlay.style.tintOpacity < 0.0f || config.overlay.style.tintOpacity > 1.0f) return false;
-    if (config.overlay.style.cornerRadius < 0 || config.overlay.style.cornerRadius > 32) return false;
     if (config.overlay.style.padding < 0 || config.overlay.style.padding > 64) return false;
-    if (config.overlay.text.fontSize < 8 || config.overlay.text.fontSize > 72) return false;
     if (config.overlay.text.fontWeight < 100 || config.overlay.text.fontWeight > 900) return false;
     
     return true;
@@ -540,16 +503,8 @@ bool Config::Validate(const AppConfig& config) const {
 
 void Config::ClampValues(AppConfig& config) {
     // Clamp overlay values
-    config.overlay.autoHideDelayMs = std::clamp(config.overlay.autoHideDelayMs, 500, 10000);
-    config.overlay.style.tintOpacity = std::clamp(config.overlay.style.tintOpacity, 0.0f, 1.0f);
-    config.overlay.style.cornerRadius = std::clamp(config.overlay.style.cornerRadius, 0, 32);
-    config.overlay.style.borderWidth = std::clamp(config.overlay.style.borderWidth, 0, 4);
     config.overlay.style.padding = std::clamp(config.overlay.style.padding, 0, 64);
-    config.overlay.text.fontSize = std::clamp(config.overlay.text.fontSize, 8, 72);
     config.overlay.text.fontWeight = std::clamp(config.overlay.text.fontWeight, 100, 900);
-    config.overlay.animation.fadeInDurationMs = std::clamp(config.overlay.animation.fadeInDurationMs, 0, 500);
-    config.overlay.animation.fadeOutDurationMs = std::clamp(config.overlay.animation.fadeOutDurationMs, 0, 500);
-    config.overlay.animation.slideDistance = std::clamp(config.overlay.animation.slideDistance, 0, 50);
 
     // Clamp presenter values
     config.presenter.fontSize = std::clamp(config.presenter.fontSize, 16, 96);
@@ -601,36 +556,6 @@ MonitorSelection Config::StringToMonitor(const std::string& str) {
     if (str == "primary") return MonitorSelection::Primary;
     if (str == "all") return MonitorSelection::All;
     return MonitorSelection::Cursor;  // Default
-}
-
-std::string Config::BlurToString(BlurType blur) {
-    switch (blur) {
-        case BlurType::Acrylic: return "acrylic";
-        case BlurType::Mica: return "mica";
-        case BlurType::Solid: return "solid";
-        default: return "acrylic";
-    }
-}
-
-BlurType Config::StringToBlur(const std::string& str) {
-    if (str == "acrylic") return BlurType::Acrylic;
-    if (str == "mica") return BlurType::Mica;
-    if (str == "solid") return BlurType::Solid;
-    return BlurType::Acrylic;  // Default
-}
-
-std::string Config::ModeToString(OverlayMode mode) {
-    switch (mode) {
-        case OverlayMode::Notification: return "notification";
-        case OverlayMode::Watermark: return "watermark";
-        default: return "notification";
-    }
-}
-
-OverlayMode Config::StringToMode(const std::string& str) {
-    if (str == "notification") return OverlayMode::Notification;
-    if (str == "watermark") return OverlayMode::Watermark;
-    return OverlayMode::Notification;  // Default
 }
 
 std::string Config::FlipCursorModeToString(FlipCursorMode mode) {

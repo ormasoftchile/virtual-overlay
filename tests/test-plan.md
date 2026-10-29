@@ -31,17 +31,17 @@ This document describes manual test procedures for verifying Virtual Overlay ove
 |------|--------|-----------------|
 | 1 | Create at least 2 virtual desktops (Win+Tab) | Desktops created |
 | 2 | Press Win+Ctrl+Right Arrow | Overlay appears showing "2: Desktop Name" |
-| 3 | Wait 2 seconds | Notification overlay fades out automatically |
+| 3 | Wait at least 3 seconds | Watermark remains visible |
 | 4 | Press Win+Ctrl+Left Arrow | Overlay shows "1: Desktop 1" |
 
 **Pass**: [ ] **Fail**: [ ]
 
-### 1.2 Watermark Mode
+### 1.2 Watermark Settings
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Open Settings > Overlay tab | Overlay settings visible |
-| 2 | Set Mode to Watermark and click Apply | Setting saved |
+| 2 | Enable the watermark and click Apply | Setting saved; no mode selector or auto-hide controls |
 | 3 | Observe desktop | Watermark remains visible |
 | 4 | Switch virtual desktops | Watermark text updates to the current desktop |
 
@@ -71,6 +71,19 @@ This document describes manual test procedures for verifying Virtual Overlay ove
 
 **Pass**: [ ] **Fail**: [ ]
 
+### 1.5 Legacy Notification Settings
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Load an older configuration with overlay mode `notification` and auto-hide enabled | Configuration loads without losing watermark appearance or monitor preferences |
+| 2 | Start Virtual Overlay on an allowed monitor and wait beyond the former auto-hide delay | Persistent watermark is visible, without popup animation or background |
+| 3 | Save settings | JSON no longer contains overlay `mode`, `autoHide`, `autoHideDelayMs`, or `animation` |
+| 4 | Disable the watermark, save, and restart | Watermark remains disabled |
+
+Automated regression: `ctest --test-dir build -C Release -R "^(watermark|settings)$" --output-on-failure`.
+
+**Pass**: [ ] **Fail**: [ ]
+
 ---
 
 ## 2. Settings Window Tests
@@ -81,7 +94,7 @@ This document describes manual test procedures for verifying Virtual Overlay ove
 |------|--------|-----------------|
 | 1 | Right-click tray icon | Context menu appears |
 | 2 | Click "Settings..." | Settings window opens |
-| 3 | Verify 3 tabs exist | General, Overlay, About |
+| 3 | Verify 5 tabs exist | General, Overlay, Flip Screen, Presenter, About |
 
 **Pass**: [ ] **Fail**: [ ]
 
@@ -105,6 +118,20 @@ This document describes manual test procedures for verifying Virtual Overlay ove
 | 2 | Change several settings | Settings modified in UI |
 | 3 | Click "Cancel" | Window closes |
 | 4 | Reopen Settings | Previous (saved) values shown |
+
+**Pass**: [ ] **Fail**: [ ]
+
+### 2.4 Typography and Display Scaling
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Open each settings tab at 100%, 125%, 150%, and 200% Windows display scaling | Native UI font, spacing, controls, and footer buttons scale together |
+| 2 | Open Presenter and inspect channel/visible-line dropdowns and model download buttons | Captions are readable without clipping or overlap |
+| 3 | Change an overlay format, slider, and dropdown without clicking Apply | Values remain pending |
+| 4 | Move Settings between monitors with different display scales several times | Layout stays aligned without size drift; pending values and the selected tab remain unchanged |
+| 5 | Close with Cancel and reopen | No pending changes were saved; typography remains consistent |
+
+Automated regression: `ctest --test-dir build -C Release -R "^settings$" --output-on-failure`.
 
 **Pass**: [ ] **Fail**: [ ]
 

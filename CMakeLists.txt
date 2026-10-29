@@ -123,6 +123,14 @@ add_executable(virtual-overlay-tests
     ${CORE_SOURCES}
 )
 
+if(MSVC)
+    # Match the app's visual styles without requiring a signed test executable.
+    set(VO_UIACCESS_VALUE "false")
+    configure_file(res/app.manifest ${CMAKE_BINARY_DIR}/tests.manifest @ONLY)
+    target_sources(virtual-overlay-tests PRIVATE ${CMAKE_BINARY_DIR}/tests.manifest)
+    target_link_options(virtual-overlay-tests PRIVATE /MANIFESTUAC:NO)
+endif()
+
 target_link_libraries(virtual-overlay-tests PRIVATE ${COMMON_LIBS})
 
 target_compile_definitions(virtual-overlay-tests PRIVATE
@@ -158,3 +166,5 @@ add_custom_command(TARGET virtual-overlay-tests POST_BUILD
 enable_testing()
 add_test(NAME vosk-runtime COMMAND virtual-overlay-tests --vosk-runtime-only)
 add_test(NAME presenter COMMAND virtual-overlay-tests)
+add_test(NAME settings COMMAND virtual-overlay-tests --settings-only)
+add_test(NAME watermark COMMAND virtual-overlay-tests --watermark-only)
