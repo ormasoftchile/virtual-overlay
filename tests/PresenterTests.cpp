@@ -832,9 +832,26 @@ static HWND SelectSettingsPage(HWND window, int index) {
     return nullptr;
 }
 
+static LRESULT CALLBACK SettingsDpiTestProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                           UINT_PTR subclassId, DWORD_PTR data) {
+    if (message == WM_NCDESTROY) {
+        RemoveWindowSubclass(window, SettingsDpiTestProc, subclassId);
+    }
+    LRESULT result = DefSubclassProc(window, message, wParam, lParam);
+    if (message == WM_GETMINMAXINFO) {
+        // Simulating DPI does not enlarge the CI runner's 1024x768 desktop.
+        // Model the corresponding viewport without clipping it to that desktop.
+        const auto* viewport = reinterpret_cast<const SIZE*>(data);
+        auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
+        limits->ptMaxTrackSize = { viewport->cx, viewport->cy };
+    }
+    return result;
+}
+
 static void TestSettingsTypographyAndDpiLayout() {
     auto& settings = SettingsWindow::Instance();
     struct Cleanup {
+        SIZE viewport = { 700, 500 };
         ~Cleanup() { SettingsWindow::Instance().Shutdown(); }
     } cleanup;
     std::wstring originalFormat = Config::Instance().Get().overlay.format;
@@ -842,6 +859,9 @@ static void TestSettingsTypographyAndDpiLayout() {
     settings.Open();
     HWND window = settings.GetHwnd();
     EXPECT_TRUE(window != nullptr && settings.IsOpen(), "settings open");
+    EXPECT_TRUE(SetWindowSubclass(window, SettingsDpiTestProc, 1,
+                                  reinterpret_cast<DWORD_PTR>(&cleanup.viewport)),
+                "synthetic DPI viewport is independent of the physical test desktop");
 
     HWND overlay = SelectSettingsPage(window, 1);
     EXPECT_TRUE(overlay != nullptr, "overlay page visible");
@@ -861,6 +881,7 @@ static void TestSettingsTypographyAndDpiLayout() {
         GetWindowRect(window, &suggested);
         suggested.right = suggested.left + MulDiv(700, dpi, USER_DEFAULT_SCREEN_DPI);
         suggested.bottom = suggested.top + MulDiv(500, dpi, USER_DEFAULT_SCREEN_DPI);
+        cleanup.viewport = { suggested.right - suggested.left, suggested.bottom - suggested.top };
         SendMessageW(window, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&suggested));
         EXPECT_EQ(TabCtrl_GetCurSel(GetDlgItem(window, IDC_TAB_CONTROL)), selectedTab,
                   "selected tab survives DPI changes");
