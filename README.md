@@ -7,8 +7,7 @@ A lightweight Windows utility that displays an overlay showing your current virt
 
 ## Features
 
-- **Watermark Mode** - Always-visible, transparent text overlay showing desktop name
-- **Notification Mode** - Brief popup when switching desktops
+- **Desktop Watermark** - Always-visible, transparent text showing the current desktop name
 - **Live Rename Detection** - Overlay updates immediately when you rename a desktop
 - **Customizable** - Position, color, opacity, font size
 - **Dodge Mode** - Overlay moves away when your cursor approaches
@@ -37,10 +36,9 @@ UIAccess builds must be installed in Program Files using the MSI.
 1. Run Virtual Overlay
 2. Right-click the tray icon  **Settings**
 3. Configure:
-   - **Mode**: Watermark (always visible) or Notification (on switch)
    - **Position**: Corner or center of screen
    - **Appearance**: Color, opacity, font size
-   - **Dodge**: Auto-hide when cursor approaches
+   - **Dodge**: Move the watermark away when the cursor approaches
    - **Screens**: Per-screen opt-out ("Show watermark on these screens") to keep
      the overlay off specific monitors (e.g. a teleprompter or captured screen)
 
@@ -158,8 +156,12 @@ Name changes are detected every 150ms via polling, so renaming a desktop updates
 
 ### Rendering
 - Uses Direct2D with per-pixel alpha for true transparency
-- `UpdateLayeredWindow` for watermark mode (no window chrome visible)
-- Acrylic/Mica backdrop support for notification mode
+- Uses `UpdateLayeredWindow` for the persistent watermark (no window chrome visible)
+
+The overlay is watermark-only. It stays visible until disabled or toggled off,
+subject to the selected monitor's opt-out and flip settings. Older configurations
+that selected notification mode load as watermarks; retired mode, auto-hide, and
+popup styling/animation options are omitted the next time settings are saved.
 
 ## Contributing
 

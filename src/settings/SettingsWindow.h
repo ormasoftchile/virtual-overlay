@@ -4,6 +4,7 @@
 #include <commctrl.h>
 #include <memory>
 #include <functional>
+#include <vector>
 #include "../config/Config.h"
 
 namespace VirtualOverlay {
@@ -48,6 +49,10 @@ private:
     bool CreateTabControl();
     bool CreatePages();
     bool CreateButtons();
+    bool UpdateFont(UINT dpi);
+    void CapturePageLayout();
+    void LayoutControls();
+    int Scale(int value) const;
 
     void OnTabChanged(int tabIndex);
     void ShowPage(SettingsTab tab);
@@ -77,6 +82,14 @@ private:
     HWND m_hPagePresenter = nullptr;
     HWND m_hPageAbout = nullptr;
 
+    struct ControlLayout {
+        HWND hwnd;
+        RECT bounds;
+    };
+    std::vector<ControlLayout> m_pageControls;
+    HFONT m_hFont = nullptr;
+    UINT m_dpi = USER_DEFAULT_SCREEN_DPI;
+
     SettingsTab m_currentTab = SettingsTab::General;
     AppConfig m_workingConfig;
     SettingsAppliedCallback m_applyCallback;
@@ -89,7 +102,7 @@ constexpr int IDC_BTN_CANCEL = 102;
 constexpr int IDC_BTN_APPLY = 103;
 
 constexpr int SETTINGS_WIDTH = 640;
-constexpr int SETTINGS_HEIGHT = 480;
+constexpr int SETTINGS_HEIGHT = 440;
 constexpr int TAB_HEIGHT = 380;
 constexpr int BUTTON_HEIGHT = 30;
 constexpr int BUTTON_WIDTH = 80;

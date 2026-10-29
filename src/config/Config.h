@@ -27,17 +27,6 @@ enum class MonitorSelection {
     All
 };
 
-enum class BlurType {
-    Acrylic,
-    Mica,
-    Solid
-};
-
-enum class OverlayMode {
-    Notification,  // Shows briefly on desktop switch, then fades
-    Watermark      // Always visible, transparent text only
-};
-
 // General settings
 struct GeneralConfig {
     bool startWithWindows = true;
@@ -49,45 +38,25 @@ struct GeneralConfig {
 
 // Overlay style settings
 struct OverlayStyleConfig {
-    BlurType blur = BlurType::Acrylic;
-    uint32_t tintColor = 0x000000;  // RGB
-    float tintOpacity = 0.6f;
-    int cornerRadius = 8;
-    uint32_t borderColor = 0x404040;  // RGB
-    int borderWidth = 1;
-    bool shadowEnabled = true;
     int padding = 16;
 };
 
 // Overlay text settings
 struct OverlayTextConfig {
     std::wstring fontFamily = L"Segoe UI Variable";
-    int fontSize = 20;
     int fontWeight = 600;
-    uint32_t color = 0xFFFFFF;  // RGB
-};
-
-// Overlay animation settings
-struct OverlayAnimationConfig {
-    int fadeInDurationMs = 150;
-    int fadeOutDurationMs = 200;
-    bool slideIn = true;
-    int slideDistance = 10;
 };
 
 // Overlay settings
 struct OverlayConfig {
     bool enabled = true;
-    OverlayMode mode = OverlayMode::Watermark;
     OverlayPosition position = OverlayPosition::TopRight;
     bool showDesktopNumber = true;
     bool showDesktopName = true;
     std::wstring format = L"{number}: {name}";
-    bool autoHide = true;
-    int autoHideDelayMs = 2000;
     MonitorSelection monitor = MonitorSelection::Cursor;
 
-    // Watermark-specific settings
+    // Watermark appearance
     int watermarkFontSize = 120;
     float watermarkOpacity = 0.25f;
     bool watermarkShadow = false;
@@ -99,7 +68,6 @@ struct OverlayConfig {
 
     OverlayStyleConfig style;
     OverlayTextConfig text;
-    OverlayAnimationConfig animation;
 };
 
 // How the mouse cursor is handled on a mirrored monitor
@@ -123,7 +91,7 @@ struct FlipConfig {
 // Monitors without an entry use the defaults below.
 struct PerMonitorSettings {
     bool flip = false;        // Horizontal teleprompter mirror on this screen
-    bool showOverlay = true;  // Watermark/notification overlay may appear on this screen
+    bool showOverlay = true;  // Watermark may appear on this screen
 
     bool operator==(const PerMonitorSettings&) const = default;
 };
@@ -145,11 +113,11 @@ PerMonitorSettings GetMonitorSettings(const MonitorSettingsMap& map, const Monit
 void SetMonitorSettings(MonitorSettingsMap& map, const std::wstring& id, const PerMonitorSettings& settings);
 void SetMonitorSettings(MonitorSettingsMap& map, const MonitorInfo& mon, const PerMonitorSettings& settings);
 
-// Whether the overlay may be shown on this monitor. Explicit opt-outs
-// (showOverlay == false) apply to every overlay mode. Mirrored (flipped)
+// Whether the watermark may be shown on this monitor. Explicit opt-outs
+// (showOverlay == false) always apply. Mirrored (flipped)
 // non-primary screens never show the watermark, because MirrorWindow captures
 // and re-renders it mirrored.
-bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon, OverlayMode mode);
+bool IsOverlayAllowedOn(const MonitorSettingsMap& map, const MonitorInfo& mon);
 
 // Per-monitor reading-baseline anchor in display-relative normalized coordinates [0.0, 1.0]
 struct PresenterMonitorAnchor {
@@ -225,10 +193,6 @@ public:
     static OverlayPosition StringToPosition(const std::string& str);
     static std::string MonitorToString(MonitorSelection mon);
     static MonitorSelection StringToMonitor(const std::string& str);
-    static std::string BlurToString(BlurType blur);
-    static BlurType StringToBlur(const std::string& str);
-    static std::string ModeToString(OverlayMode mode);
-    static OverlayMode StringToMode(const std::string& str);
     static std::string FlipCursorModeToString(FlipCursorMode mode);
     static FlipCursorMode StringToFlipCursorMode(const std::string& str);
 

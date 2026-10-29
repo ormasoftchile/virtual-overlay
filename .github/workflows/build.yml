@@ -29,6 +29,9 @@ jobs:
       run: |
         msbuild build\virtual-overlay.sln /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
 
+    - name: Test Settings and Watermark
+      run: ctest --test-dir build -C Release -R "^(settings|watermark)$" --output-on-failure
+
     - name: Build MSI Installer
       working-directory: installer
       run: |

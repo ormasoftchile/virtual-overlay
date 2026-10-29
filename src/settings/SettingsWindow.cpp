@@ -5,6 +5,7 @@
 #include "../overlay/OverlayConfig.h"
 #include <windowsx.h>
 #include <commctrl.h>
+#include <algorithm>
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -34,7 +35,7 @@ bool SettingsWindow::Init(HINSTANCE hInstance, HWND hParentWnd) {
     // Initialize common controls
     INITCOMMONCONTROLSEX icex = {};
     icex.dwSize = sizeof(icex);
-    icex.dwICC = ICC_TAB_CLASSES | ICC_STANDARD_CLASSES | ICC_LINK_CLASS;
+    icex.dwICC = ICC_TAB_CLASSES | ICC_STANDARD_CLASSES | ICC_LINK_CLASS | ICC_BAR_CLASSES;
     InitCommonControlsEx(&icex);
 
     // Register window class
@@ -91,7 +92,9 @@ void SettingsWindow::Open() {
     }
 
     // Create controls
-    if (!CreateTabControl() || !CreatePages() || !CreateButtons()) {
+    // Capture page geometry in 96-DPI units before applying the monitor's font.
+    if (!UpdateFont(USER_DEFAULT_SCREEN_DPI) ||
+        !CreateTabControl() || !CreatePages() || !CreateButtons()) {
         LOG_ERROR("Failed to create settings controls");
         DestroyWindow(m_hwnd);
         m_hwnd = nullptr;
@@ -100,6 +103,12 @@ void SettingsWindow::Open() {
 
     // Load settings to UI
     LoadSettingsToUI();
+    CapturePageLayout();
+    if (!UpdateFont(GetDpiForWindow(m_hwnd))) {
+        Close();
+        return;
+    }
+    LayoutControls();
 
     // Show first tab
     ShowPage(SettingsTab::General);
@@ -117,11 +126,19 @@ void SettingsWindow::Close() {
 }
 
 bool SettingsWindow::CreateMainWindow() {
-    // Center on screen
-    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-    int x = (screenWidth - SETTINGS_WIDTH) / 2;
-    int y = (screenHeight - SETTINGS_HEIGHT) / 2;
+    POINT cursor = {};
+    if (!GetCursorPos(&cursor)) {
+        LOG_ERROR("Failed to locate settings monitor: %lu", GetLastError());
+        return false;
+    }
+    MONITORINFO monitor = { sizeof(monitor) };
+    if (!GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &monitor)) {
+        LOG_ERROR("Failed to query settings monitor: %lu", GetLastError());
+        return false;
+    }
+    const RECT& workArea = monitor.rcWork;
+    int x = workArea.left + (workArea.right - workArea.left - SETTINGS_WIDTH) / 2;
+    int y = workArea.top + (workArea.bottom - workArea.top - SETTINGS_HEIGHT) / 2;
 
     m_hwnd = CreateWindowExW(
         WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
@@ -135,7 +152,23 @@ bool SettingsWindow::CreateMainWindow() {
         this
     );
 
-    return m_hwnd != nullptr;
+    if (!m_hwnd) return false;
+
+    UINT dpi = GetDpiForWindow(m_hwnd);
+    RECT bounds = { 0, 0, MulDiv(SETTINGS_WIDTH, dpi, USER_DEFAULT_SCREEN_DPI),
+                         MulDiv(SETTINGS_HEIGHT, dpi, USER_DEFAULT_SCREEN_DPI) };
+    if (!AdjustWindowRectExForDpi(&bounds, static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_STYLE)),
+                                  FALSE, static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE)), dpi)) {
+        LOG_ERROR("Failed to size settings window: %lu", GetLastError());
+        Close();
+        return false;
+    }
+    int width = bounds.right - bounds.left;
+    int height = bounds.bottom - bounds.top;
+    x = std::max(workArea.left, workArea.left + (workArea.right - workArea.left - width) / 2);
+    y = std::max(workArea.top, workArea.top + (workArea.bottom - workArea.top - height) / 2);
+    SetWindowPos(m_hwnd, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+    return true;
 }
 
 bool SettingsWindow::CreateTabControl() {
@@ -161,8 +194,7 @@ bool SettingsWindow::CreateTabControl() {
     }
 
     // Set font
-    HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    SendMessageW(m_hTabControl, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+    SendMessageW(m_hTabControl, WM_SETFONT, reinterpret_cast<WPARAM>(m_hFont), TRUE);
 
     // Add tabs
     TCITEMW tie = {};
@@ -246,12 +278,95 @@ bool SettingsWindow::CreateButtons() {
     );
 
     // Set font
-    HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    SendMessageW(m_hBtnOK, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
-    SendMessageW(m_hBtnCancel, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
-    SendMessageW(m_hBtnApply, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+    SendMessageW(m_hBtnOK, WM_SETFONT, reinterpret_cast<WPARAM>(m_hFont), TRUE);
+    SendMessageW(m_hBtnCancel, WM_SETFONT, reinterpret_cast<WPARAM>(m_hFont), TRUE);
+    SendMessageW(m_hBtnApply, WM_SETFONT, reinterpret_cast<WPARAM>(m_hFont), TRUE);
 
     return m_hBtnOK && m_hBtnCancel && m_hBtnApply;
+}
+
+bool SettingsWindow::UpdateFont(UINT dpi) {
+    NONCLIENTMETRICSW metrics = { sizeof(metrics) };
+    if (!SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi)) {
+        LOG_ERROR("Failed to query settings font: %lu", GetLastError());
+        return false;
+    }
+    HFONT font = CreateFontIndirectW(&metrics.lfMessageFont);
+    if (!font) {
+        LOG_ERROR("Failed to create settings font: %lu", GetLastError());
+        return false;
+    }
+    HFONT previous = m_hFont;
+    m_hFont = font;
+    m_dpi = dpi;
+    EnumChildWindows(m_hwnd, [](HWND control, LPARAM data) -> BOOL {
+        SendMessageW(control, WM_SETFONT, static_cast<WPARAM>(data), TRUE);
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(font));
+    if (previous) DeleteObject(previous);
+    return true;
+}
+
+void SettingsWindow::CapturePageLayout() {
+    m_pageControls.clear();
+    for (HWND page : { m_hPageGeneral, m_hPageOverlay, m_hPageFlip, m_hPagePresenter, m_hPageAbout }) {
+        for (HWND control = GetWindow(page, GW_CHILD); control; control = GetWindow(control, GW_HWNDNEXT)) {
+            RECT bounds = {};
+            GetWindowRect(control, &bounds);
+            MapWindowPoints(HWND_DESKTOP, page, reinterpret_cast<LPPOINT>(&bounds), 2);
+            wchar_t className[32] = {};
+            GetClassNameW(control, className, 32);
+            if (wcscmp(className, WC_COMBOBOXW) == 0) {
+                RECT dropped = {};
+                SendMessageW(control, CB_GETDROPPEDCONTROLRECT, 0, reinterpret_cast<LPARAM>(&dropped));
+                bounds.bottom = bounds.top + dropped.bottom - dropped.top;
+            }
+            m_pageControls.push_back({ control, bounds });
+        }
+    }
+}
+
+int SettingsWindow::Scale(int value) const {
+    return MulDiv(value, m_dpi, USER_DEFAULT_SCREEN_DPI);
+}
+
+void SettingsWindow::LayoutControls() {
+    if (!m_hTabControl || !m_hBtnOK) return;
+
+    RECT client = {};
+    GetClientRect(m_hwnd, &client);
+    int margin = Scale(MARGIN);
+    int buttonHeight = Scale(BUTTON_HEIGHT);
+    int buttonWidth = Scale(BUTTON_WIDTH);
+    int buttonY = client.bottom - margin - buttonHeight;
+    int tabWidth = client.right - margin * 2;
+    int tabHeight = buttonY - margin * 2;
+    SetWindowPos(m_hTabControl, nullptr, margin, margin, tabWidth, tabHeight,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    RECT pageBounds = { 0, 0, tabWidth, tabHeight };
+    TabCtrl_AdjustRect(m_hTabControl, FALSE, &pageBounds);
+    MapWindowPoints(m_hTabControl, m_hwnd, reinterpret_cast<LPPOINT>(&pageBounds), 2);
+    for (HWND page : { m_hPageGeneral, m_hPageOverlay, m_hPageFlip, m_hPagePresenter, m_hPageAbout }) {
+        if (page) {
+            SetWindowPos(page, nullptr, pageBounds.left, pageBounds.top,
+                         pageBounds.right - pageBounds.left, pageBounds.bottom - pageBounds.top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+    for (const auto& control : m_pageControls) {
+        const RECT& bounds = control.bounds;
+        SetWindowPos(control.hwnd, nullptr, Scale(bounds.left), Scale(bounds.top),
+                     Scale(bounds.right - bounds.left), Scale(bounds.bottom - bounds.top),
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    int buttonX = client.right - margin - buttonWidth;
+    for (HWND button : { m_hBtnApply, m_hBtnCancel, m_hBtnOK }) {
+        SetWindowPos(button, nullptr, buttonX, buttonY, buttonWidth, buttonHeight,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        buttonX -= buttonWidth + margin;
+    }
+    RedrawWindow(m_hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
 LRESULT CALLBACK SettingsWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -274,6 +389,31 @@ LRESULT CALLBACK SettingsWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 
 LRESULT SettingsWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_GETFONT:
+            return reinterpret_cast<LRESULT>(m_hFont);
+
+        case WM_SIZE:
+            LayoutControls();
+            return 0;
+
+        case WM_DPICHANGED: {
+            UINT dpi = HIWORD(wParam);
+            if (m_hFont && !UpdateFont(dpi)) return 0;
+            m_dpi = dpi;
+            auto* bounds = reinterpret_cast<RECT*>(lParam);
+            SetWindowPos(hwnd, nullptr, bounds->left, bounds->top,
+                         bounds->right - bounds->left, bounds->bottom - bounds->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            LayoutControls();
+            return 0;
+        }
+
+        case WM_SETTINGCHANGE:
+            if (wParam == SPI_SETNONCLIENTMETRICS && m_hFont && UpdateFont(m_dpi)) {
+                LayoutControls();
+            }
+            break;
+
         case WM_COMMAND: {
             int wmId = LOWORD(wParam);
             switch (wmId) {
@@ -312,6 +452,16 @@ LRESULT SettingsWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         case WM_DESTROY:
             m_hwnd = nullptr;
             return 0;
+
+        case WM_NCDESTROY:
+            m_pageControls.clear();
+            if (m_hFont) DeleteObject(m_hFont);
+            m_hFont = nullptr;
+            m_hTabControl = nullptr;
+            m_hBtnOK = m_hBtnCancel = m_hBtnApply = nullptr;
+            m_hPageGeneral = m_hPageOverlay = m_hPageFlip = m_hPagePresenter = m_hPageAbout = nullptr;
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            break;
 
         default:
             break;
@@ -425,17 +575,9 @@ void SettingsWindow::PreviewOverlay() {
     
     OverlaySettings previewSettings;
     previewSettings.enabled = true;
-    previewSettings.mode = overlayConfig.mode;
     previewSettings.position = overlayConfig.position;
     previewSettings.monitor = overlayConfig.monitor;
     previewSettings.format = overlayConfig.format;
-    
-    if (overlayConfig.mode == OverlayMode::Notification) {
-        previewSettings.autoHide = true;
-        previewSettings.autoHideDelayMs = 3000;
-    } else {
-        previewSettings.autoHide = false;
-    }
     
     previewSettings.watermarkFontSize = overlayConfig.watermarkFontSize;
     previewSettings.watermarkOpacity = overlayConfig.watermarkOpacity;
@@ -445,23 +587,10 @@ void SettingsWindow::PreviewOverlay() {
     previewSettings.dodgeOnHover = overlayConfig.dodgeOnHover;
     previewSettings.dodgeProximity = overlayConfig.dodgeProximity;
     
-    previewSettings.style.backdrop = overlayConfig.style.blur;
-    previewSettings.style.tintColor = overlayConfig.style.tintColor;
-    previewSettings.style.tintOpacity = overlayConfig.style.tintOpacity;
-    previewSettings.style.cornerRadius = overlayConfig.style.cornerRadius;
     previewSettings.style.padding = overlayConfig.style.padding;
-    previewSettings.style.borderWidth = overlayConfig.style.borderWidth;
-    previewSettings.style.borderColor = overlayConfig.style.borderColor;
     
     previewSettings.text.fontFamily = overlayConfig.text.fontFamily;
-    previewSettings.text.fontSize = overlayConfig.text.fontSize;
     previewSettings.text.fontWeight = overlayConfig.text.fontWeight;
-    previewSettings.text.color = overlayConfig.text.color;
-    
-    previewSettings.animation.fadeInDurationMs = overlayConfig.animation.fadeInDurationMs;
-    previewSettings.animation.fadeOutDurationMs = overlayConfig.animation.fadeOutDurationMs;
-    previewSettings.animation.slideIn = overlayConfig.animation.slideIn;
-    previewSettings.animation.slideDistance = overlayConfig.animation.slideDistance;
     
     OverlayWindow::Instance().ApplySettings(previewSettings);
     OverlayWindow::Instance().Show(1, L"Preview Desktop");
