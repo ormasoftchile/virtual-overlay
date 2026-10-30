@@ -28,6 +28,7 @@ constexpr int IDC_OVL_WATERMARK_COLOR_BTN = 319;
 constexpr int IDC_OVL_DODGE = 321;
 constexpr int IDC_OVL_DODGE_PROXIMITY = 322;
 constexpr int IDC_OVL_DODGE_PROXIMITY_LABEL = 323;
+constexpr int IDC_OVL_DODGE_STICKY = 324;
 constexpr int IDC_OVL_WM_MONITOR_BASE = 330;
 constexpr int IDC_OVL_WM_MONITOR_MAX = 16;
 

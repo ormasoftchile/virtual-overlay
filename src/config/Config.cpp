@@ -216,6 +216,7 @@ bool Config::Load(const std::wstring& filePath) {
             // Dodge settings
             if (o.contains("dodgeOnHover")) m_config.overlay.dodgeOnHover = o["dodgeOnHover"].get<bool>();
             if (o.contains("dodgeProximity")) m_config.overlay.dodgeProximity = o["dodgeProximity"].get<int>();
+            if (o.contains("dodgeSticky")) m_config.overlay.dodgeSticky = o["dodgeSticky"].get<bool>();
             
             // Parse style
             if (o.contains("style")) {
@@ -389,6 +390,7 @@ bool Config::Save(const std::wstring& filePath) {
         // Dodge settings
         j["overlay"]["dodgeOnHover"] = m_config.overlay.dodgeOnHover;
         j["overlay"]["dodgeProximity"] = m_config.overlay.dodgeProximity;
+        j["overlay"]["dodgeSticky"] = m_config.overlay.dodgeSticky;
         
         // Style
         j["overlay"]["style"]["padding"] = m_config.overlay.style.padding;
