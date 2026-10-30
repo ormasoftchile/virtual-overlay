@@ -586,6 +586,7 @@ void SettingsWindow::PreviewOverlay() {
     
     previewSettings.dodgeOnHover = overlayConfig.dodgeOnHover;
     previewSettings.dodgeProximity = overlayConfig.dodgeProximity;
+    previewSettings.dodgeSticky = overlayConfig.dodgeSticky;
     
     previewSettings.style.padding = overlayConfig.style.padding;
     

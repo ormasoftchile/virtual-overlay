@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-13
+
+### Added
+- **Teleprompter screen flip** - Native flip support (FlipManager with inversion
+  hook plus mouse mirroring) for teleprompter/mirror displays, and KVM display
+  switch handling fixes for the teleprompter mirror and watermark overlay.
+
+## [1.3.0] - 2026-10-29
+
+### Added
+- **Sticky Dodge Option** - New "Sticky dodge" setting lets the user choose
+  whether the watermark returns to its original position after dodging the
+  cursor or holds the dodged position until the pointer hits the overlay again.
+
+## [1.2.0] - 2026-10-29
 
 ### Added
 - **Per-monitor watermark opt-out** - Per-screen checkboxes on the Overlay
@@ -56,5 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows 10 (1803+)
 - Windows 11 (all versions including 24H2 preview builds)
 
-[Unreleased]: https://github.com/ormasoftchile/virtual-overlay/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ormasoftchile/virtual-overlay/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.3.0
+[1.2.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.2.0
+[1.1.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.1.0
 [1.0.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.0.0

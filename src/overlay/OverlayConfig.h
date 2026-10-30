@@ -42,6 +42,7 @@ struct OverlaySettings {
     // Dodge mode - move overlay when mouse approaches
     bool dodgeOnHover = false;
     int dodgeProximity = 100;  // pixels
+    bool dodgeSticky = false;  // Hold dodged position after cursor leaves (vs. return to original)
     
     OverlayStyleSettings style;
     OverlayTextSettings text;

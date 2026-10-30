@@ -113,7 +113,7 @@ void TrayIcon::BuildContextMenu() {
     if (hPresMenu) {
         auto& pres = PresenterController::Instance();
         UINT openFlags = MF_STRING | (pres.IsOpen() ? MF_CHECKED : 0);
-        AppendMenuW(hPresMenu, openFlags, IDM_TRAY_PRES_TOGGLE, L"&Show Presenter\tCtrl+Shift+P");
+        AppendMenuW(hPresMenu, openFlags, IDM_TRAY_PRES_TOGGLE, L"&Show Presenter\tCtrl+Shift+Y");
 
         UINT pauseFlags = MF_STRING | (pres.IsPaused() ? MF_CHECKED : 0);
         if (!pres.IsOpen()) pauseFlags |= MF_GRAYED;

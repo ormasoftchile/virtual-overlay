@@ -66,6 +66,8 @@ struct OverlayConfig {
     bool dodgeOnHover = false;
     int dodgeProximity = 100;
 
+    bool dodgeSticky = false;  // Hold dodged position after cursor leaves (vs. return to original)
+
     OverlayStyleConfig style;
     OverlayTextConfig text;
 };
@@ -128,7 +130,7 @@ struct PresenterMonitorAnchor {
 // Native speech-following Presenter settings
 struct PresenterConfig {
     bool enabled = false;
-    std::wstring toggleHotkey = L"Ctrl+Shift+P";
+    std::wstring toggleHotkey = L"Ctrl+Shift+Y";
     std::wstring fontFamily = L"Segoe UI Variable";
     int fontSize = 32;
     int captionWidth = 840;

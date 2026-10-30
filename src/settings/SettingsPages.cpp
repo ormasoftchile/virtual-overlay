@@ -451,6 +451,9 @@ HWND SettingsPages::CreateOverlayPage(HWND hParent, HINSTANCE hInstance, const R
     CreateLabel(hPage, hInstance, IDC_OVL_DODGE_PROXIMITY_LABEL, L"100px", x + 210, y + 2, 40, ctrlH);
     y += spacing + 5;
 
+    CreateCheckbox(hPage, hInstance, IDC_OVL_DODGE_STICKY, L"Sticky dodge", x, y, 220, ctrlH);
+    y += spacing;
+
     CreateButton(hPage, hInstance, IDC_OVL_PREVIEW, L"Preview", x, y, 80, 25);
 
     // Right column: per-monitor watermark opt-out (shared monitor registry)
@@ -510,6 +513,7 @@ void SettingsPages::LoadOverlaySettings(HWND hPage, const OverlayConfig& config,
     
     CheckDlgButton(hPage, IDC_OVL_DODGE, config.dodgeOnHover ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(hPage, IDC_OVL_DODGE_PROXIMITY, TBM_SETPOS, TRUE, config.dodgeProximity);
+    CheckDlgButton(hPage, IDC_OVL_DODGE_STICKY, config.dodgeSticky ? BST_CHECKED : BST_UNCHECKED);
     wchar_t proxText[16];
     swprintf_s(proxText, L"%dpx", config.dodgeProximity);
     SetDlgItemTextW(hPage, IDC_OVL_DODGE_PROXIMITY_LABEL, proxText);
@@ -552,6 +556,7 @@ void SettingsPages::SaveOverlaySettings(HWND hPage, OverlayConfig& config, Monit
     
     config.dodgeOnHover = IsDlgButtonChecked(hPage, IDC_OVL_DODGE) == BST_CHECKED;
     config.dodgeProximity = static_cast<int>(SendDlgItemMessageW(hPage, IDC_OVL_DODGE_PROXIMITY, TBM_GETPOS, 0, 0));
+    config.dodgeSticky = IsDlgButtonChecked(hPage, IDC_OVL_DODGE_STICKY) == BST_CHECKED;
 
     // Per-monitor watermark opt-out (flip flags for these monitors are preserved)
     const auto& mons = Monitor::Instance().GetMonitors();
@@ -710,7 +715,7 @@ HWND SettingsPages::CreatePresenterPage(HWND hParent, HINSTANCE hInstance, const
 
     // Enable Presenter checkbox
     CreateCheckbox(hPage, hInstance, IDC_PRES_ENABLE,
-                   L"Show Presenter caption surface (Ctrl+Shift+P)", x, y, 360, ctrlH);
+                   L"Show Presenter caption surface (Ctrl+Shift+Y)", x, y, 360, ctrlH);
     y += spacing;
 
     // Microphone selector
@@ -888,7 +893,7 @@ HWND SettingsPages::CreateAboutPage(HWND hParent, HINSTANCE hInstance, const REC
     CreateLabel(hPage, hInstance, 0, L"Virtual Overlay", x, y, 200, 26);
     y += 30;
 
-    std::wstring version = L"Version: 1.2.0";
+    std::wstring version = L"Version: 1.3.0";
     CreateLabel(hPage, hInstance, IDC_ABOUT_VERSION, version.c_str(), x, y, 200, ctrlH);
     y += spacing;
 

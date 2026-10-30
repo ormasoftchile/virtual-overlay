@@ -50,7 +50,7 @@ namespace Defaults {
 
     // App info
     inline const char* AppName = "Virtual Overlay";
-    inline const char* AppVersion = "1.1.0";
+    inline const char* AppVersion = "1.2.0";
     inline const wchar_t* ConfigFileName = L"config.json";
     inline const wchar_t* LogDirName = L"logs";
 

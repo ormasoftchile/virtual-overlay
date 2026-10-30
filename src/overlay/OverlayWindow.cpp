@@ -487,14 +487,36 @@ void OverlayWindow::OnDodgeTimer() {
         bool cursorNearOriginal = PtInRect(&origRect, cursorPos);
         
         if (!cursorNearOriginal) {
-            // Cursor far from original position, stop dodging
-            m_isDodging = false;
-            m_dodgeMonitorRect = {};  // Clear stored monitor
-            m_settings.position = m_originalPosition;
-            UpdateWindowPosition();
-            RenderWatermark();
-            LOG_DEBUG("Dodge: returned to original position %d", 
-                      static_cast<int>(m_settings.position));
+            if (m_settings.dodgeSticky) {
+                // Sticky: hold the dodged position. Release the hold once the
+                // cursor comes back near the overlay (the "hit"); until then the
+                // watermark stays where the dodge moved it.
+                RECT curRect = {};
+                if (GetWindowRect(m_hwnd, &curRect)) {
+                    RECT nearCur = curRect;
+                    nearCur.left -= prox;
+                    nearCur.top -= prox;
+                    nearCur.right += prox;
+                    nearCur.bottom += prox;
+                    if (PtInRect(&nearCur, cursorPos)) {
+                        // Pointer hit the overlay: release hold, keep current position.
+                        m_isDodging = false;
+                        m_dodgeMonitorRect = {};
+                        UpdateWindowPosition();
+                        RenderWatermark();
+                    }
+                }
+                // Cursor is away and sticky is on: hold the dodged position.
+            } else {
+                // Cursor far from original position, stop dodging
+                m_isDodging = false;
+                m_dodgeMonitorRect = {};  // Clear stored monitor
+                m_settings.position = m_originalPosition;
+                UpdateWindowPosition();
+                RenderWatermark();
+                LOG_DEBUG("Dodge: returned to original position %d", 
+                          static_cast<int>(m_settings.position));
+            }
         }
     } else {
         // Not dodging - check if cursor is near current position

@@ -115,7 +115,7 @@ Side panel image for welcome/completion dialogs.
 
 When releasing a new version:
 
-1. Update `Version` in `Package.wxs`
+1. Update `Version` in `Package.wxs` (and the deprecated `Product.wxs` to match)
 2. Keep `UpgradeCode` the same (enables upgrades)
 3. Rebuild MSI
 4. Major upgrades automatically uninstall previous versions

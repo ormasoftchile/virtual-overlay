@@ -273,6 +273,7 @@ bool App::InitOverlay() {
     
     overlaySettings.dodgeOnHover = config.overlay.dodgeOnHover;
     overlaySettings.dodgeProximity = config.overlay.dodgeProximity;
+    overlaySettings.dodgeSticky = config.overlay.dodgeSticky;
     
     overlaySettings.style.padding = config.overlay.style.padding;
     
@@ -385,6 +386,7 @@ void App::OnSettingsChanged() {
         
         overlaySettings.dodgeOnHover = config.overlay.dodgeOnHover;
         overlaySettings.dodgeProximity = config.overlay.dodgeProximity;
+        overlaySettings.dodgeSticky = config.overlay.dodgeSticky;
         
         overlaySettings.style.padding = config.overlay.style.padding;
         
@@ -496,7 +498,7 @@ void App::ShowAbout() {
     MessageBoxW(
         m_hMainWnd,
         L"Virtual Overlay\n"
-        L"Version 1.2.0\n\n"
+        L"Version 1.3.0\n\n"
         L"A Windows utility for virtual desktop overlay,\n"
         L"teleprompter screen flipping, and offline speech-following presenter.\n\n"
         L"Speech alignment adapted from TalkPrompter (\u00A9 2026 Sven Bosau, MIT).\n"
