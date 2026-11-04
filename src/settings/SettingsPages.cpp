@@ -893,7 +893,7 @@ HWND SettingsPages::CreateAboutPage(HWND hParent, HINSTANCE hInstance, const REC
     CreateLabel(hPage, hInstance, 0, L"Virtual Overlay", x, y, 200, 26);
     y += 30;
 
-    std::wstring version = L"Version: 1.3.0";
+    std::wstring version = L"Version: 1.3.1";
     CreateLabel(hPage, hInstance, IDC_ABOUT_VERSION, version.c_str(), x, y, 200, ctrlH);
     y += spacing;
 

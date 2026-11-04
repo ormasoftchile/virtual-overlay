@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hook plus mouse mirroring) for teleprompter/mirror displays, and KVM display
   switch handling fixes for the teleprompter mirror and watermark overlay.
 
+## [1.3.1] - 2026-11-04
+
+### Fixed
+- **Keyboard shortcuts** - Remapped hotkeys that collided with Visual Studio Code
+  defaults so they no longer hijack editor shortcuts: presenter toggle moved from
+  `Ctrl+Shift+P` to `Ctrl+Shift_Y`, settings hotkey moved from
+  `Ctrl+Shift+O` to `Ctrl+Shift_Q`, and flip toggle moved from
+  `Ctrl+Shift_F` to `Ctrl+Shift_R`. Existing installs migrate
+  automatically to the new bindings on next launch.
+
 ## [1.3.0] - 2026-10-29
 
 ### Added
@@ -70,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows 10 (1803+)
 - Windows 11 (all versions including 24H2 preview builds)
 
-[Unreleased]: https://github.com/ormasoftchile/virtual-overlay/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/ormasoftchile/virtual-overlay/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.3.1
 [1.3.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.3.0
 [1.2.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.2.0
 [1.1.0]: https://github.com/ormasoftchile/virtual-overlay/releases/tag/v1.1.0
