@@ -10,7 +10,7 @@ namespace Defaults {
     // General Settings
     constexpr bool StartWithWindows = false;  // Default off for safety
     constexpr bool ShowTrayIcon = true;
-    inline const char* SettingsHotkey = "Ctrl+Shift+O";
+    inline const char* SettingsHotkey = "Ctrl+Shift_Q";
 
     // Overlay Settings
     constexpr bool OverlayEnabled = true;
@@ -50,7 +50,7 @@ namespace Defaults {
 
     // App info
     inline const char* AppName = "Virtual Overlay";
-    inline const char* AppVersion = "1.1.0";
+    inline const char* AppVersion = "1.2.0";
     inline const wchar_t* ConfigFileName = L"config.json";
     inline const wchar_t* LogDirName = L"logs";
 

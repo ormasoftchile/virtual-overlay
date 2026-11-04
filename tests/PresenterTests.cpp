@@ -612,7 +612,7 @@ static void TestWatermarkOnlyConfiguration() {
                 { "mode", mode }, { "enabled", true }, { "autoHide", true }, { "autoHideDelayMs", 500 },
                 { "position", "bottom-left" }, { "monitor", "primary" }, { "format", "{name}" },
                 { "watermarkFontSize", 96 }, { "watermarkOpacity", 0.4f }, { "watermarkColor", "#AABBCC" },
-                { "dodgeOnHover", true }, { "dodgeProximity", 80 },
+                { "dodgeOnHover", true }, { "dodgeProximity", 80 }, { "dodgeSticky", true },
                 { "style", { { "blur", "acrylic" }, { "tintOpacity", 5.0f }, { "cornerRadius", 100 }, { "padding", 18 } } },
                 { "text", { { "fontFamily", "Segoe UI" }, { "fontWeight", 500 }, { "fontSize", 30 }, { "color", "#FFFFFF" } } },
                 { "animation", { { "fadeInDurationMs", 150 }, { "fadeOutDurationMs", 200 }, { "slideIn", true } } }
@@ -636,6 +636,7 @@ static void TestWatermarkOnlyConfiguration() {
         EXPECT_TRUE(std::fabs(overlay.watermarkOpacity - 0.4f) < 1e-4f, "watermark opacity preserved");
         EXPECT_EQ(overlay.watermarkColor, uint32_t(0xAABBCC), "watermark color preserved");
         EXPECT_EQ(overlay.dodgeOnHover, true, "dodge preference preserved");
+        EXPECT_EQ(overlay.dodgeSticky, true, "sticky dodge preference preserved");
         EXPECT_EQ(overlay.style.padding, 18, "watermark padding preserved");
         EXPECT_EQ(overlay.text.fontFamily, std::wstring(L"Segoe UI"), "watermark font family preserved");
         EXPECT_EQ(overlay.text.fontWeight, 500, "watermark weight preserved");

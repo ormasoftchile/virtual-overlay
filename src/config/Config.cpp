@@ -216,6 +216,7 @@ bool Config::Load(const std::wstring& filePath) {
             // Dodge settings
             if (o.contains("dodgeOnHover")) m_config.overlay.dodgeOnHover = o["dodgeOnHover"].get<bool>();
             if (o.contains("dodgeProximity")) m_config.overlay.dodgeProximity = o["dodgeProximity"].get<int>();
+            if (o.contains("dodgeSticky")) m_config.overlay.dodgeSticky = o["dodgeSticky"].get<bool>();
             
             // Parse style
             if (o.contains("style")) {
@@ -329,6 +330,11 @@ bool Config::Load(const std::wstring& filePath) {
             }
         }
         
+        // Migrate hotkeys that collided with VS Code defaults to the new key bindings
+        if (m_config.general.settingsHotkey == L"Ctrl+Shift+O") m_config.general.settingsHotkey = L"Ctrl+Shift_Q";
+        if (m_config.flip.toggleHotkey == L"Ctrl+Shift_F") m_config.flip.toggleHotkey = L"Ctrl+Shift_R";
+        if (m_config.presenter.toggleHotkey == L"Ctrl+Shift_P") m_config.presenter.toggleHotkey = L"Ctrl+Shift_Y";
+
         // Clamp values to valid ranges
         ClampValues(m_config);
         
@@ -389,6 +395,7 @@ bool Config::Save(const std::wstring& filePath) {
         // Dodge settings
         j["overlay"]["dodgeOnHover"] = m_config.overlay.dodgeOnHover;
         j["overlay"]["dodgeProximity"] = m_config.overlay.dodgeProximity;
+        j["overlay"]["dodgeSticky"] = m_config.overlay.dodgeSticky;
         
         // Style
         j["overlay"]["style"]["padding"] = m_config.overlay.style.padding;
