@@ -73,10 +73,10 @@ git clone https://github.com/ormasoftchile/virtual-overlay.git
 cd virtual-overlay
 
 # Build everything (EXE + MSI), no signing
-.\build.ps1 -SkipSign
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./build.ps1 -SkipSign
 
 # Build and sign everything (unlock signing in SimplySign Desktop first)
-.\build.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./build.ps1
 
 # Or manually:
 cmake -B build -G "Visual Studio 17 2022" -A x64

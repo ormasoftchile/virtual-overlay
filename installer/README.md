@@ -29,8 +29,8 @@ Build `Package.wxs` only. It is the only installer definition used for releases.
 ### Recommended: use build.ps1 (from project root)
 
 ```powershell
-.\build.ps1 -SkipSign       # build EXE + MSI, no signing
-.\build.ps1                  # build EXE + MSI + sign both (requires Certum SimplySign)
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./build.ps1 -SkipSign       # build EXE + MSI, no signing
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./build.ps1                  # build EXE + MSI + sign both (requires Certum SimplySign)
 ```
 
 ### Manual (from the installer/ directory)
